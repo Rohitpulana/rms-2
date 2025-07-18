@@ -27,7 +27,7 @@ const AssignedSchedule = require('./models/AssignedSchedule');
 // .then(() => console.log('✅ MongoDB connected'))
 // .catch(err => console.error('❌ MongoDB error:', err));
 
- mongoURI = process.env.MONGODB_URI;
+ const mongoURI = process.env.MONGODB_URI;
 
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
@@ -113,6 +113,7 @@ function isAdmin(req, res, next) {
 app.get('/', (req, res) => {
   res.redirect('/login');
 });
+
 
 // Login GET
 app.get('/login', csrfProtection, (req, res) => {
