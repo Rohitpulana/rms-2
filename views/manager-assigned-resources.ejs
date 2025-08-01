@@ -1,8 +1,44 @@
 
+
+<%
+// Calculate total possible hours in the selected month
+let year, month;
+if (typeof monthFilter !== 'undefined' && monthFilter) {
+    const parts = monthFilter.split('-');
+    if (parts.length === 2) {
+        year = parseInt(parts[0], 10);
+        month = parseInt(parts[1], 10);
+    } 
+} else {
+    const today = new Date();
+    year = today.getFullYear();
+    month = today.getMonth() + 1;
+}
+const daysInMonth = new Date(year, month, 0).getDate();
+let totalPossibleHours = daysInMonth * 8;
+
+// Aggregate total hours per employee across all their schedules
+const empAggregates = {};
+const empDayTotals = {}; // { empCode: { date: totalHours } }
+schedules.forEach(s => {
+    const empCode = s.employee?.empCode || 'N/A';
+    if (!empAggregates[empCode]) empAggregates[empCode] = { total: 0 };
+    if (!empDayTotals[empCode]) empDayTotals[empCode] = {};
+    if (s.dailyHours && dateRange) {
+        dateRange.forEach(date => {
+            const h = s.dailyHours[date] !== undefined ? Number(s.dailyHours[date]) : 0;
+            empAggregates[empCode].total += h;
+            if (!empDayTotals[empCode][date]) empDayTotals[empCode][date] = 0;
+            empDayTotals[empCode][date] += h;
+        });
+    }
+});
+%>
+
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Manager Assigned Resources</title>
+    <title>Manager Assigned Schedules</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.datatables.net/2.0.8/css/dataTables.dataTables.min.css">
     <style>
@@ -12,6 +48,7 @@
         /* Removed table striping except for weekend columns */
         /* Removed table row hover effect */
         .weekend-col { background: #ececec !important; }
+        .low-hours { background: #fff3cd !important; }
         .btn-primary, .btn-success, .btn-info { border-radius: 20px; font-weight: 500; }
         .form-label { font-weight: 500; color: #1976d2; }
         .form-select, .form-control { border-radius: 8px; }
@@ -25,150 +62,143 @@
 <body class="bg-light">
 
 <div class="container mt-5">
-<%
-// Calculate total possible hours in the selected month
-function getWorkingDaysInMonth(year, month) {
-    let count = 0;
-    const daysInMonth = new Date(year, month, 0).getDate();
-    for (let day = 1; day <= daysInMonth; day++) {
-        const d = new Date(year, month - 1, day);
-        const weekday = d.getDay();
-        if (weekday !== 0 && weekday !== 6) count++;
-    }
-    return count;
-}
-
-let year, month;
-if (typeof monthFilter !== 'undefined' && monthFilter) {
-    const parts = monthFilter.split('-');
-    if (parts.length === 2) {
-        year = parseInt(parts[0], 10);
-        month = parseInt(parts[1], 10);
-    }
-} else {
-    const today = new Date();
-    year = today.getFullYear();
-    month = today.getMonth() + 1;
-}
-let totalPossibleHours = getWorkingDaysInMonth(year, month) * 8;
-%>
-    <% if (typeof errorMessage !== 'undefined' && errorMessage) { %>
-      <div class="alert alert-danger alert-dismissible fade show" role="alert" style="font-size:1.1rem;font-weight:500;">
-        <%= errorMessage %>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-      </div>
-    <% } %>
     <form class="d-flex mb-3 align-items-center" method="get" action="/dashboard/manager/assigned-resources">
         <label for="monthPicker" class="form-label me-2 mb-0">Select Month:</label>
-        <input type="month" id="monthPicker" name="month" class="form-control me-2" style="max-width:180px;" value="<%= typeof monthFilter !== 'undefined' && monthFilter ? monthFilter : '' %>">
+        <input type="month" id="monthPicker" name="month" class="form-control me-2" style="max-width:180px;" value="<%= monthFilter || '' %>">
         <button type="submit" class="btn btn-primary me-2">Go</button>
-        <a href="/schedule" class="btn btn-success ms-auto" style="white-space:nowrap;">Assign Resource</a>
+        <a href="/dashboard/manager/schedule" class="btn btn-success ms-auto" style="white-space:nowrap;">Assign Resource</a>
     </form>
 
     <h1 class="page-title text-center mb-4">Manager Assigned Schedules</h1>
-    <div class="filter-card">
-      <form class="row g-3" method="get" action="/dashboard/manager/assigned-resources">
-        <div class="col-md-4">
-            <label for="employeeFilter" class="form-label">Employee</label>
-            <select id="employeeFilter" name="employee" class="form-select">
-                <option value="">All Employees</option>
-                <% if (typeof allEmployees !== 'undefined') { allEmployees.forEach(function(emp) { %>
-                    <option value="<%= emp.empCode %>" <%= (employeeFilter === emp.empCode ? 'selected' : '') %>>
-                        <%= emp.empCode %> - <%= emp.name %>
-                        <% if (emp.division) { %> | <%= emp.division %> <% } %>
-                        <% if (emp.designation) { %> | <%= emp.designation %> <% } %>
-                    </option>
-                <% }) } %>
-            </select>
-        </div>
-        <div class="col-md-4">
-            <label for="projectFilter" class="form-label">Project</label>
-            <select id="projectFilter" name="project" class="form-select">
-                <option value="">All Projects</option>
-                <% if (typeof allProjects !== 'undefined') { allProjects.forEach(function(proj) { %>
-                    <option value="<%= proj.projectName %>" <%= (projectFilter === proj.projectName ? 'selected' : '') %>>
-                        <%= proj.projectName %>
-                        <% if (proj.projectManager) { %> | Manager: <%= proj.projectManager %> <% } %>
-                    </option>
-                <% }) } %>
-            </select>
-        </div>
-        <div class="col-md-4 d-flex align-items-end">
-            <button type="submit" class="btn btn-primary">Filter</button>
-            <a href="/dashboard/manager/assigned-resources" class="btn btn-secondary ms-2">Reset</a>
-        </div>
-      </form>
-    </div>
-    <div class="card mb-4 p-3">
-      <button class="btn btn-info shadow-sm" id="exportExcelBtn">Export to Excel</button>
-    </div>
-    <div class="table-responsive" style="overflow-x:auto;">
-    <table id="assignedSchedulesTable" class="table table-bordered align-middle shadow-sm">
-        <thead>
-            <tr>
-                <th>Emp Code</th>
-                <th>Resource Name</th>
-                <th>Project Assigned</th>
-                <% if (dateRange && dateRange.length) { dateRange.forEach(function(date) { 
-                    // Parse date to get day of week
-                    let parts = date.split('-');
-                    let day = parseInt(parts[0], 10);
-                    let monthShort = parts[1];
-                    let monthNum = new Date(Date.parse(monthShort + " 1, 2020")).getMonth();
-                    let d = new Date(year, monthNum, day);
-                    let dow = d.getDay();
-                %>
-                    <th class="<%= (dow === 0 || dow === 6) ? 'weekend-col' : '' %>"><%= date %></th>
-                <% }); } %>
-                <th>Total Hours</th>
-                <th>Total Possible Hours</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <% schedules.forEach(s => {
-                const empCode = s.employee?.empCode || 'N/A';
-                let totalHours = 0;
-            %>
-            <tr id="row-<%= s._id %>">
-                <td><%= empCode %></td>
-                <td class="<%= totalHours < totalPossibleHours ? 'table-warning' : '' %>"><%= s.employee?.name || 'N/A' %></td>
-                <td class="project-cell"><span><%= s.project?.projectName || 'N/A' %></span></td>
-                <% dateRange?.forEach(date => {
-                    // Parse date to get day of week
-                    let parts = date.split('-');
-                    let day = parseInt(parts[0], 10);
-                    let monthShort = parts[1];
-                    let monthNum = new Date(Date.parse(monthShort + " 1, 2020")).getMonth();
-                    let d = new Date(year, monthNum, day);
-                    let dow = d.getDay();
-                    const h = (s.dailyHours && s.dailyHours[date] !== undefined && s.dailyHours[date] != 0) ? Number(s.dailyHours[date]) : 0;
-                    totalHours += h;
-                %>
-                    <td class="hours-cell <%= (dow === 0 || dow === 6) ? 'weekend-col' : '' %>" data-date="<%= date %>"><span><%= h !== 0 ? h : '' %></span></td>
-                <% }) %>
-                <td><%= totalHours %></td>
-                <td><%= totalPossibleHours %></td>
-                <td class="action-cell">
-                    <button class="btn btn-sm btn-primary me-1" onclick="enableInlineEdit('<%= s._id %>')">Edit</button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteSchedule('<%= s._id %>')">Delete</button>
-                </td>
-            </tr>
-            <% }); %>
-        </tbody>
-    </table>
+
+    <div class="filter-card mb-4">
+        <form class="row g-3" method="get" action="/dashboard/manager/assigned-resources">
+            <div class="col-md-4">
+                <label for="employeeFilter" class="form-label">Employee</label>
+                <select id="employeeFilter" name="employee" class="form-select">
+                    <option value="">All Employees</option>
+                    <% allEmployees?.forEach(emp => { %>
+                        <option value="<%= emp.empCode %>" <%= (employeeFilter === emp.empCode ? 'selected' : '') %>>
+                            <%= emp.empCode %> - <%= emp.name %>
+                            <% if (emp.division) { %> | <%= emp.division %> <% } %>
+                            <% if (emp.designation) { %> | <%= emp.designation %> <% } %>
+                        </option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="projectFilter" class="form-label">Project</label>
+                <select id="projectFilter" name="project" class="form-select">
+                    <option value="">All Projects</option>
+                    <% allProjects?.forEach(proj => { %>
+                        <option value="<%= proj.projectName %>" <%= (projectFilter === proj.projectName ? 'selected' : '') %>>
+                            <%= proj.projectName %> <% if (proj.projectManager) { %> | Manager: <%= proj.projectManager %> <% } %>
+                        </option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary">Filter</button>
+                <a href="/dashboard/manager/assigned-resources" class="btn btn-secondary ms-2">Reset</a>
+            </div>
+        </form>
     </div>
 
-    <div id="validationWarning" class="alert alert-danger d-none mt-3" role="alert"></div>
+    <div class="card mb-4 p-3 d-flex justify-content-between align-items-center">
+        <button class="btn btn-info shadow-sm" id="exportExcelBtn">Export to Excel</button>
+        <a href="/dashboard/manager/calendar-view" class="btn btn-warning ms-2">Calendar View</a>
+    </div>
 
+    <div class="table-responsive">
+        <table id="assignedSchedulesTable" class="table table-bordered align-middle shadow-sm">
+            <thead>
+                <tr>
+                    <th>Emp Code</th>
+                    <th>Resource Name</th>
+                    <th>Project Assigned</th>
+                    <% if (dateRange && dateRange.length) { dateRange.forEach(function(date) { 
+                        // Always show all days, but highlight weekends
+                        let parts = date.split('-');
+                        let day = parseInt(parts[0], 10);
+                        let monthShort = parts[1];
+                        let monthNum = new Date(Date.parse(monthShort + " 1, 2020")).getMonth();
+                        let d = new Date(year, monthNum, day);
+                        let dow = d.getDay();
+                    %>
+                        <th class="<%= (dow === 0 || dow === 6) ? 'weekend-col' : '' %>"><%= date %></th>
+                    <% }); } %>
+                    <th>Total Hours</th>
+                    <th>Total Possible Hours</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% schedules.forEach(s => {
+                    const empCode = s.employee?.empCode || 'N/A';
+                    let totalHours = 0;
+                %>
+                <tr id="row-<%= s._id %>">
+                    <td><%= empCode %></td>
+                    <td class="<%= empAggregates[s.employee?.empCode]?.total < totalPossibleHours ? 'table-warning' : '' %>">
+    <%= s.employee?.name || 'N/A' %>
+</td>
+
+                    <td class="project-cell"><span><%= s.project?.projectName || 'N/A' %></span></td>
+                    <% dateRange?.forEach(date => {
+                        // Always show all days, but highlight weekends
+                        let parts = date.split('-');
+                        let day = parseInt(parts[0], 10);
+                        let monthShort = parts[1];
+                        let monthNum = new Date(Date.parse(monthShort + " 1, 2020")).getMonth();
+                        let d = new Date(year, monthNum, day);
+                        let dow = d.getDay();
+                        const h = (s.dailyHours && s.dailyHours[date] !== undefined && s.dailyHours[date] != 0) ? Number(s.dailyHours[date]) : 0;
+                        totalHours += h;
+                        let cellClass = (dow === 0 || dow === 6) ? 'weekend-col ' : '';
+                        // Highlight only if employee's total for the day < 8
+                        if (empDayTotals[s.employee?.empCode || 'N/A'][date] > 0 && empDayTotals[s.employee?.empCode || 'N/A'][date] < 8) cellClass += 'low-hours ';
+                        const isWeekend = (dow === 0 || dow === 6);
+                    %>
+                        <td class="hours-cell <%= cellClass.trim() %>" data-date="<%= date %>">
+                            <% if (isWeekend) { %>
+                                <input type="number" min="0" max="8" class="form-control form-control-sm drag-fill-hours" value="<%= h !== 0 ? h : '' %>" 
+                                    data-rowid="<%= s._id %>" data-date="<%= date %>" style="width:60px; background:#ececec;" readonly tabindex="-1" />
+                            <% } else { %>
+                                <input type="number" min="0" max="8" class="form-control form-control-sm drag-fill-hours" value="<%= h !== 0 ? h : '' %>" 
+                                    data-rowid="<%= s._id %>" data-date="<%= date %>" style="width:60px;" />
+                            <% } %>
+                        </td>
+                    <% }) %>
+                    <td><%= totalHours %></td>
+                    <td><%= totalPossibleHours %></td>
+                    <td class="action-cell">
+                        <button class="btn btn-sm btn-danger" onclick="deleteSchedule('<%= s._id %>')">Delete</button>
+                    </td>
+                </tr>
+                <% }); %>
+            </tbody>
+        </table>
+    </div>
 </div>
 
+<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script type="text/javascript" src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
 
 <script>
+    $(document).ready(function () {
+        $('#assignedSchedulesTable').DataTable({
+            scrollX: false,
+            lengthMenu: [[25, 50, 100, -1], [25, 50, 100, 'All']],
+            pageLength: -1,
+            dom: "<'row mb-2 mt-3'<'col-md-6 d-flex align-items-center'l><'col-md-6 d-flex justify-content-end'f>>" +
+                 "<'row'<'col-12'tr>>" +
+                 "<'row mt-2'<'col-md-5'i><'col-md-7'p>>"
+        });
+    });
+
     document.getElementById('exportExcelBtn').addEventListener('click', function () {
         const table = document.getElementById('assignedSchedulesTable');
         const clone = table.cloneNode(true);
@@ -185,97 +215,67 @@ let totalPossibleHours = getWorkingDaysInMonth(year, month) * 8;
         XLSX.writeFile(wb, "assigned_schedules.xlsx");
     });
 
-    $(document).ready(function () {
-        $('#assignedSchedulesTable').DataTable({
-            scrollX: true,
-            lengthMenu: [[25, 50, 100, -1], [25, 50, 100, 'All']],
-            pageLength: -1,
-            dom: "<'row mb-2 mt-3'<'col-md-6 d-flex align-items-center'l><'col-md-6 d-flex justify-content-end'f>>" +
-                 "<'row'<'col-12'tr>>" +
-                 "<'row mt-2'<'col-md-5'i><'col-md-7'p>>"
+
+    // --- Drag-fill logic for all rows ---
+    let isDragging = false;
+    let dragValue = null;
+    let $startInput = null;
+    $(document).on('mousedown', '.drag-fill-hours', function (e) {
+        isDragging = true;
+        dragValue = $(this).val();
+        $startInput = $(this);
+        $(this).addClass('drag-filling');
+    });
+    $(document).on('mouseenter', '.drag-fill-hours', function (e) {
+        if (isDragging && $startInput && $(this).closest('tr').is($startInput.closest('tr'))) {
+            // Only fill if not readonly (i.e., not a weekend cell)
+            if (!$(this).prop('readonly')) {
+                $(this).val(dragValue).addClass('drag-filling');
+                $(this).trigger('change'); // auto-save on drag
+            }
+        }
+    });
+    $(document).on('mouseup.dragfill', function () {
+        if (isDragging) {
+            isDragging = false;
+            dragValue = null;
+            $startInput = null;
+            $('.drag-filling').removeClass('drag-filling');
+        }
+    });
+
+    // --- Auto-save on change ---
+    $(document).on('change', '.drag-fill-hours', function () {
+        const $input = $(this);
+        const rowId = $input.data('rowid');
+        const date = $input.data('date');
+        const value = $input.val();
+        // Collect all dailyHours for this row
+        const dailyHours = {};
+        $input.closest('tr').find('.drag-fill-hours').each(function () {
+            dailyHours[$(this).data('date')] = $(this).val();
+        });
+        // Project name (read-only)
+        const project = $input.closest('tr').find('.project-cell span').text().trim();
+        $.ajax({
+            url: '/dashboard/manager/assigned-resources/' + rowId,
+            type: 'PUT',
+            data: { project: { projectName: project }, dailyHours },
+            success: function () {},
+            error: function (xhr) {
+                alert(xhr.responseJSON?.error || 'Error saving data');
+            }
         });
     });
 
-    let editingRowId = null;
-
-    function enableInlineEdit(id) {
-        if (editingRowId) return;
-        editingRowId = id;
-        const row = $('#row-' + id);
-        const projectCell = row.find('.project-cell');
-        const projectValue = projectCell.text().trim();
-        projectCell.attr('data-original', projectValue);
-        projectCell.html(`<input type="text" class="form-control form-control-sm" value="${projectValue}" id="edit-project-${id}" value="${projectValue}">`);
-        row.find('.hours-cell').each(function() {
-            const date = $(this).data('date');
-            const value = $(this).text().trim();
-            $(this).attr('data-original', value);
-            $(this).html(`<input type="number" min="0" max="8" class="form-control form-control-sm" value="${value}" id="edit-hours-${id}-${date}" value="${value}">`);
-        });
-        row.find('.action-cell').html(`
-            <button class="btn btn-sm btn-success me-1" onclick="saveInlineEdit('${id}')">Save</button>
-            <button class="btn btn-sm btn-secondary" onclick="cancelInlineEdit('${id}')">Cancel</button>
-        `);
-    }
-
-    function saveInlineEdit(id) {
-        const row = $('#row-' + id);
-        const project = row.find(`#edit-project-${id}`).val();
-        const dailyHours = {};
-        row.find('.hours-cell').each(function() {
-            const date = $(this).data('date');
-            const value = $(this).find('input').val();
-            dailyHours[date] = value;
-        });
-        $.ajax({
-            url: '/assigned-resources/' + id,
-            type: 'PUT',
-            data: { project: { projectName: project }, dailyHours },
-            success: function(response) {
-                if (response.success) {
-                    const updated = response.schedule;
-                    const row = $('#row-' + id);
-                    row.find('.project-cell').html(`<span>${updated.project?.projectName || 'N/A'}</span>`);
-                    row.find('.hours-cell').each(function() {
-                        const date = $(this).data('date');
-                        const value = updated.dailyHours && updated.dailyHours[date] !== undefined && updated.dailyHours[date] != 0 ? updated.dailyHours[date] : '';
-                        $(this).html(`<span>${value}</span>`);
-                    });
-                    row.find('.action-cell').html(`
-                        <button class="btn btn-sm btn-primary me-1" onclick="enableInlineEdit('${id}')">Edit</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteSchedule('${id}')">Delete</button>
-                    `);
-                    editingRowId = null;
-                    $('#validationWarning').addClass('d-none').text('');
-                } else {
-                    $('#validationWarning').removeClass('d-none').text(response.error || 'Unknown error');
-                }
-            },
-            error: function(xhr) {
-                let msg = xhr.responseJSON?.error || 'Unknown error';
-                $('#validationWarning').removeClass('d-none').text(msg);
-            }
-        });
-    }
-
-    function cancelInlineEdit(id) {
-        location.reload();
-    }
-
     function deleteSchedule(id) {
-        if (confirm('Are you sure you want to delete this schedule?')) {
+        if (confirm("Are you sure you want to delete this schedule?")) {
             $.ajax({
-                url: '/assigned-resources/' + id,
+                url: '/dashboard/manager/assigned-resources/' + id,
                 type: 'DELETE',
-                success: function(response) {
-                    if (response.success) {
-                        location.reload();
-                    } else {
-                        alert('Delete failed: ' + (response.error || 'Unknown error'));
-                    }
-                },
-                error: function(xhr) {
-                    alert('Delete failed: ' + (xhr.responseJSON?.error || 'Unknown error'));
+                success: function () { location.reload(); },
+                error: function (xhr) {
+                    alert(xhr.responseJSON?.error || 'Error deleting data');
                 }
             });
         }

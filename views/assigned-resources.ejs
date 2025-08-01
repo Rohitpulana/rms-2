@@ -1,16 +1,6 @@
 
 <%
 // Calculate total possible hours in the selected month
-function getWorkingDaysInMonth(year, month) {
-    let count = 0;
-    const daysInMonth = new Date(year, month, 0).getDate();
-    for (let day = 1; day <= daysInMonth; day++) {
-        const d = new Date(year, month - 1, day);
-        const weekday = d.getDay();
-        if (weekday !== 0 && weekday !== 6) count++;
-    }
-    return count;
-}
 
 let year, month;
 if (typeof monthFilter !== 'undefined' && monthFilter) {
@@ -24,17 +14,30 @@ if (typeof monthFilter !== 'undefined' && monthFilter) {
     year = today.getFullYear();
     month = today.getMonth() + 1;
 }
-let totalPossibleHours = getWorkingDaysInMonth(year, month) * 8;
+const daysInMonth = new Date(year, month, 0).getDate();
+// Calculate number of weekdays (Mon-Fri) in the month
+let weekdayCount = 0;
+for (let d = 1; d <= daysInMonth; d++) {
+    const dayOfWeek = new Date(year, month - 1, d).getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) { // 0 = Sunday, 6 = Saturday
+        weekdayCount++;
+    }
+}
+let totalPossibleHours = weekdayCount * 8;
 
 // Aggregate total hours per employee across all their schedules
 const empAggregates = {};
+const empDayTotals = {}; // { empCode: { date: totalHours } }
 schedules.forEach(s => {
     const empCode = s.employee?.empCode || 'N/A';
     if (!empAggregates[empCode]) empAggregates[empCode] = { total: 0 };
+    if (!empDayTotals[empCode]) empDayTotals[empCode] = {};
     if (s.dailyHours && dateRange) {
         dateRange.forEach(date => {
             const h = s.dailyHours[date] !== undefined ? Number(s.dailyHours[date]) : 0;
             empAggregates[empCode].total += h;
+            if (!empDayTotals[empCode][date]) empDayTotals[empCode][date] = 0;
+            empDayTotals[empCode][date] += h;
         });
     }
 });
@@ -53,6 +56,7 @@ schedules.forEach(s => {
         /* Removed table striping except for weekend columns */
         /* Removed table row hover effect */
         .weekend-col { background: #ececec !important; }
+        .low-hours { background: #fff3cd !important; }
         .btn-primary, .btn-success, .btn-info { border-radius: 20px; font-weight: 500; }
         .form-label { font-weight: 500; color: #1976d2; }
         .form-select, .form-control { border-radius: 8px; }
@@ -108,8 +112,9 @@ schedules.forEach(s => {
         </form>
     </div>
 
-    <div class="card mb-4 p-3 d-flex justify-content-end">
+    <div class="card mb-4 p-3 d-flex justify-content-between align-items-center">
         <button class="btn btn-info shadow-sm" id="exportExcelBtn">Export to Excel</button>
+        <a href="/calendar-view" class="btn btn-warning ms-2">Calendar View</a>
     </div>
 
     <div class="table-responsive">
@@ -120,7 +125,7 @@ schedules.forEach(s => {
                     <th>Resource Name</th>
                     <th>Project Assigned</th>
                     <% if (dateRange && dateRange.length) { dateRange.forEach(function(date) { 
-                        // Parse date to get day of week
+                        // Always show all days, but highlight weekends
                         let parts = date.split('-');
                         let day = parseInt(parts[0], 10);
                         let monthShort = parts[1];
@@ -148,7 +153,7 @@ schedules.forEach(s => {
 
                     <td class="project-cell"><span><%= s.project?.projectName || 'N/A' %></span></td>
                     <% dateRange?.forEach(date => {
-                        // Parse date to get day of week
+                        // Always show all days, but highlight weekends
                         let parts = date.split('-');
                         let day = parseInt(parts[0], 10);
                         let monthShort = parts[1];
@@ -157,13 +162,24 @@ schedules.forEach(s => {
                         let dow = d.getDay();
                         const h = (s.dailyHours && s.dailyHours[date] !== undefined && s.dailyHours[date] != 0) ? Number(s.dailyHours[date]) : 0;
                         totalHours += h;
+                        let cellClass = (dow === 0 || dow === 6) ? 'weekend-col ' : '';
+                        // Highlight only if employee's total for the day < 8
+                        if (empDayTotals[s.employee?.empCode || 'N/A'][date] > 0 && empDayTotals[s.employee?.empCode || 'N/A'][date] < 8) cellClass += 'low-hours ';
+                        const isWeekend = (dow === 0 || dow === 6);
                     %>
-                        <td class="hours-cell <%= (dow === 0 || dow === 6) ? 'weekend-col' : '' %>" data-date="<%= date %>"><span><%= h !== 0 ? h : '' %></span></td>
+                        <td class="hours-cell <%= cellClass.trim() %>" data-date="<%= date %>">
+                            <% if (isWeekend) { %>
+                                <input type="number" min="0" max="8" class="form-control form-control-sm drag-fill-hours" value="<%= h !== 0 ? h : '' %>" 
+                                    data-rowid="<%= s._id %>" data-date="<%= date %>" style="width:60px; background:#ececec;" readonly tabindex="-1" />
+                            <% } else { %>
+                                <input type="number" min="0" max="8" class="form-control form-control-sm drag-fill-hours" value="<%= h !== 0 ? h : '' %>" 
+                                    data-rowid="<%= s._id %>" data-date="<%= date %>" style="width:60px;" />
+                            <% } %>
+                        </td>
                     <% }) %>
                     <td><%= totalHours %></td>
                     <td><%= totalPossibleHours %></td>
                     <td class="action-cell">
-                        <button class="btn btn-sm btn-primary me-1" onclick="enableInlineEdit('<%= s._id %>')">Edit</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteSchedule('<%= s._id %>')">Delete</button>
                     </td>
                 </tr>
@@ -207,51 +223,58 @@ schedules.forEach(s => {
         XLSX.writeFile(wb, "assigned_schedules.xlsx");
     });
 
-    let editingRowId = null;
 
-    function enableInlineEdit(id) {
-        if (editingRowId) return;
-        editingRowId = id;
-        const row = $('#row-' + id);
-        const projectCell = row.find('.project-cell');
-        const projectValue = projectCell.text().trim();
-        projectCell.html(`<input type="text" class="form-control form-control-sm" value="${projectValue}" id="edit-project-${id}">`);
+    // --- Drag-fill logic for all rows ---
+    let isDragging = false;
+    let dragValue = null;
+    let $startInput = null;
+    $(document).on('mousedown', '.drag-fill-hours', function (e) {
+        isDragging = true;
+        dragValue = $(this).val();
+        $startInput = $(this);
+        $(this).addClass('drag-filling');
+    });
+    $(document).on('mouseenter', '.drag-fill-hours', function (e) {
+        if (isDragging && $startInput && $(this).closest('tr').is($startInput.closest('tr'))) {
+            // Only fill if not readonly (i.e., not a weekend cell)
+            if (!$(this).prop('readonly')) {
+                $(this).val(dragValue).addClass('drag-filling');
+                $(this).trigger('change'); // auto-save on drag
+            }
+        }
+    });
+    $(document).on('mouseup.dragfill', function () {
+        if (isDragging) {
+            isDragging = false;
+            dragValue = null;
+            $startInput = null;
+            $('.drag-filling').removeClass('drag-filling');
+        }
+    });
 
-        row.find('.hours-cell').each(function () {
-            const date = $(this).data('date');
-            const value = $(this).text().trim();
-            $(this).html(`<input type="number" min="0" max="8" class="form-control form-control-sm" value="${value}" id="edit-hours-${id}-${date}">`);
-        });
-
-        row.find('.action-cell').html(`
-            <button class="btn btn-sm btn-success me-1" onclick="saveInlineEdit('${id}')">Save</button>
-            <button class="btn btn-sm btn-secondary" onclick="cancelInlineEdit('${id}')">Cancel</button>
-        `);
-    }
-
-    function saveInlineEdit(id) {
-        const row = $('#row-' + id);
-        const project = row.find(`#edit-project-${id}`).val();
+    // --- Auto-save on change ---
+    $(document).on('change', '.drag-fill-hours', function () {
+        const $input = $(this);
+        const rowId = $input.data('rowid');
+        const date = $input.data('date');
+        const value = $input.val();
+        // Collect all dailyHours for this row
         const dailyHours = {};
-        row.find('.hours-cell').each(function () {
-            const date = $(this).data('date');
-            dailyHours[date] = $(this).find('input').val();
+        $input.closest('tr').find('.drag-fill-hours').each(function () {
+            dailyHours[$(this).data('date')] = $(this).val();
         });
-
+        // Project name (read-only)
+        const project = $input.closest('tr').find('.project-cell span').text().trim();
         $.ajax({
-            url: '/assigned-resources/' + id,
+            url: '/assigned-resources/' + rowId,
             type: 'PUT',
             data: { project: { projectName: project }, dailyHours },
-            success: function () { location.reload(); },
+            success: function () {},
             error: function (xhr) {
                 alert(xhr.responseJSON?.error || 'Error saving data');
             }
         });
-    }
-
-    function cancelInlineEdit(id) {
-        location.reload();
-    }
+    });
 
     function deleteSchedule(id) {
         if (confirm("Are you sure you want to delete this schedule?")) {

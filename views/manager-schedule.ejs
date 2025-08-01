@@ -122,41 +122,17 @@
     const section = document.getElementById('project-allocation-section');
     section.innerHTML = '';
     if (!selected.length) return;
-    // If single employee, allow multiple projects
-    if (selected.length === 1) {
-      section.innerHTML = `<label class='form-label'><strong>Allocate Projects:</strong></label>
-        <div id='project-rows'></div>
-        <button type='button' class='btn btn-outline-primary btn-sm mt-2' onclick='addProjectRow()'>➕ Add Project</button>`;
-      addProjectRow();
-      // Enable validation on all initial inputs
-      setTimeout(() => {
-        document.querySelectorAll('.hours-input').forEach(inp => {
-          inp.oninput = function() { validateHoursInput(this); };
-        });
-      }, 100);
-    } else {
-      // Multiple employees: single project allocation
-      section.innerHTML = `<label class='form-label'><strong>Allocate Project:</strong></label>
-        <div class='row mb-2'>
-          <div class='col-md-6'>
-            <select name='project_id' class='form-select' required>
-              <option value=''>-- Select Project --</option>
-              <% projects.forEach(project => { %>
-                <option value='<%= project._id %>'><%= project.projectName %></option>
-              <% }) %>
-            </select>
-          </div>
-          <div class='col-md-3'>
-            <input type='number' name='hours' class='form-control' min='1' max='8' placeholder='Hours (1-8)' required oninput='validateMultiEmpHours(this)'>
-            <div class='text-danger small hours-warning' style='display:none;'></div>
-          </div>
-        </div>`;
-      // Enable validation for multi-employee mode
-      setTimeout(() => {
-        const inp = section.querySelector('input[name="hours"]');
-        if (inp) inp.oninput = function() { validateMultiEmpHours(this); };
-      }, 100);
-    }
+    // For both single and multiple employees, allow multiple project selection and submit as arrays
+    section.innerHTML = `<label class='form-label'><strong>Allocate Project(s):</strong></label>
+      <div id='project-rows'></div>
+      <button type='button' class='btn btn-outline-primary btn-sm mt-2' onclick='addProjectRow()'>➕ Add Project</button>`;
+    addProjectRow();
+    // Enable validation on all initial inputs
+    setTimeout(() => {
+      document.querySelectorAll('.hours-input').forEach(inp => {
+        inp.oninput = function() { validateHoursInput(this); };
+      });
+    }, 100);
   }
 
   // Add a new project row for single employee allocation

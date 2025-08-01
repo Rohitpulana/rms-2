@@ -1,5 +1,6 @@
-// Manager: Assign Schedule POST
 
+require('dotenv').config();
+// Manager: Assign Schedule POST
 
 const express = require('express');
 const session = require('express-session');
@@ -13,17 +14,30 @@ const fs = require('fs');
 const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 
+
 // Models
 const Employee = require('./models/Employee');
 const ProjectMaster = require('./models/ProjectMaster');
 const PracticeMaster = require('./models/PracticeMaster');
 const AssignedSchedule = require('./models/AssignedSchedule');
 
-mongoose.connect('mongodb://127.0.0.1:27017/hrms-app', {
+
+// mongoose.connect('mongodb://127.0.0.1:27017/hrms-app', {
+//   useNewUrlParser: true,
+//   useUnifiedTopology: true
+// }).then(() => console.log('✅ MongoDB connected'))
+//   .catch(err => console.error('❌ MongoDB error:', err));
+
+const mongoURI = process.env.MONGODB_URI;
+
+mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
-}).then(() => console.log('✅ MongoDB connected'))
-  .catch(err => console.error('❌ MongoDB error:', err));
+}).then(() => {
+  console.log('Connected to MongoDB atlas successfully');
+}).catch(err => {
+  console.error('MongoDB connection error:', err);
+});
 
 
 const app = express();
@@ -142,6 +156,77 @@ app.get('/dashboard/manager', isAuth, (req, res) => {
     layout: 'sidebar-layout',
     manager: true // flag for sidebar rendering
   });
+});
+
+
+// Manager Calendar Route
+app.get('/dashboard/manager/calendar-view', (req, res) => {
+    // Manager Calendar View: fetch and pass all required data
+    (async () => {
+        try {
+            const monthFilter = req.query.month || '';
+
+            // Get all schedules (optionally, you can filter by manager's employees/projects if needed)
+            const allSchedules = await AssignedSchedule.find()
+                .populate('employee')
+                .populate('project');
+
+            // Generate dateRange for the selected month (or current month if not selected), skipping weekends
+            let year, month;
+            if (monthFilter) {
+                const parts = monthFilter.split('-');
+                year = parseInt(parts[0], 10);
+                month = parseInt(parts[1], 10) - 1;
+            } else {
+                const now = new Date();
+                year = now.getFullYear();
+                month = now.getMonth();
+            }
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const dateRange = [];
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateObj = new Date(year, month, d);
+                const dayOfWeek = dateObj.getDay();
+                if (dayOfWeek === 0 || dayOfWeek === 6) continue; // skip Sunday/Saturday
+                const day = dateObj.getDate();
+                const monthName = dateObj.toLocaleString('default', { month: 'short' });
+                dateRange.push(`${day}-${monthName}`);
+            }
+
+            // Get all employees
+            const allEmployees = await Employee.find({}, 'empCode name division designation');
+
+            // Build empDayProjects: { empCode: { date: [ { projectName, hours } ] } }
+            const empDayProjects = {};
+            allSchedules.forEach(s => {
+                const empCode = s.employee?.empCode || 'N/A';
+                if (!empDayProjects[empCode]) empDayProjects[empCode] = {};
+                if (s.dailyHours && s.project && s.project.projectName) {
+                    Object.keys(s.dailyHours).forEach(dateKey => {
+                        if (!empDayProjects[empCode][dateKey]) empDayProjects[empCode][dateKey] = [];
+                        empDayProjects[empCode][dateKey].push({
+                            projectName: s.project.projectName,
+                            hours: s.dailyHours[dateKey]
+                        });
+                    });
+                }
+            });
+
+            res.render('manager-calendar-view', {
+                year: year,
+                month: month + 1, // for display
+                dateRange,
+                allEmployees,
+                empDayProjects,
+                layout: 'sidebar-layout',
+                title: 'Manager Calendar View',
+                manager: true
+            });
+        } catch (err) {
+            console.error('Error loading manager calendar view:', err);
+            res.status(500).send('Internal Server Error');
+        }
+    })();
 });
 
 // Manager: Schedule page
@@ -1375,70 +1460,67 @@ app.post('/schedule', async (req, res) => {
       return dateStr;
     }
 
-    // Over-allocation check: for each employee, for each day, sum all hours across all projects
-    if (filteredEmpCodes.length === 1 && req.body['project_ids[]']) {
-      const empCode = filteredEmpCodes[0];
-      const employee = await Employee.findOne({ empCode });
-      if (!employee) {
-        console.warn('Employee not found:', empCode);
-        return res.redirect('/assigned-resources');
-      }
-      // Get projects and hours arrays
-      const projectIds = Array.isArray(req.body['project_ids[]']) ? req.body['project_ids[]'] : [req.body['project_ids[]']];
-      const hoursList = Array.isArray(req.body['hours_list[]']) ? req.body['hours_list[]'] : [req.body['hours_list[]']];
-
-      // For each day, sum existing hours from all schedules for this employee
-      let overAllocated = false;
-      let overAllocDetails = [];
-      for (const { key: dateKey, dateObj } of dateKeys) {
-        let newTotal = 0;
-        for (let i = 0; i < projectIds.length; i++) {
-          newTotal += Number(hoursList[i]) || 0;
+    // Support: single employee + multiple projects, multiple employees + single project, and multiple employees + multiple projects
+    const projectIds = req.body['project_ids[]'] ? (Array.isArray(req.body['project_ids[]']) ? req.body['project_ids[]'] : [req.body['project_ids[]']]) : [];
+    const hoursList = req.body['hours_list[]'] ? (Array.isArray(req.body['hours_list[]']) ? req.body['hours_list[]'] : [req.body['hours_list[]']]) : [];
+    // If both projectIds and hoursList are present, assign all selected employees to all selected projects
+    if (projectIds.length && hoursList.length && projectIds.length === hoursList.length) {
+      for (const empCode of filteredEmpCodes) {
+        const employee = await Employee.findOne({ empCode });
+        if (!employee) {
+          console.warn('Employee not found:', empCode);
+          continue;
         }
-        // Sum existing hours from all schedules for this employee on this day
-        let existingSchedules = await AssignedSchedule.find({ employee: employee._id });
-        let existingTotal = 0;
-        for (const sched of existingSchedules) {
-          let dh = sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)];
-          existingTotal += Number(dh) || 0;
-        }
-        // If updating existing schedules, subtract hours for this employee/project for this day
-        for (let i = 0; i < projectIds.length; i++) {
-          let sched = await AssignedSchedule.findOne({ employee: employee._id, project: projectIds[i] });
-          if (sched && sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)]) {
-            existingTotal -= Number(sched.dailyHours[formatDateKey(dateKey)]) || 0;
+        // Over-allocation check for each day
+        let overAllocated = false;
+        let overAllocDetails = [];
+        for (const { key: dateKey, dateObj } of dateKeys) {
+          let newTotal = 0;
+          for (let i = 0; i < projectIds.length; i++) {
+            newTotal += Number(hoursList[i]) || 0;
+          }
+          let existingSchedules = await AssignedSchedule.find({ employee: employee._id });
+          let existingTotal = 0;
+          for (const sched of existingSchedules) {
+            let dh = sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)];
+            existingTotal += Number(dh) || 0;
+          }
+          // Subtract hours for this employee/project for this day (if updating)
+          for (let i = 0; i < projectIds.length; i++) {
+            let sched = await AssignedSchedule.findOne({ employee: employee._id, project: projectIds[i] });
+            if (sched && sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)]) {
+              existingTotal -= Number(sched.dailyHours[formatDateKey(dateKey)]) || 0;
+            }
+          }
+          let totalHours = existingTotal + newTotal;
+          if (totalHours > 8) {
+            overAllocated = true;
+            overAllocDetails.push(`${formatDateKey(dateKey)}: ${totalHours} hours`);
           }
         }
-        let totalHours = existingTotal + newTotal;
-        if (totalHours > 8) {
-          overAllocated = true;
-          overAllocDetails.push(`${formatDateKey(dateKey)}: ${totalHours} hours`);
+        if (overAllocated) {
+          return res.redirect(`/assigned-resources?error=${encodeURIComponent('Over allocation: Total hours for ' + empCode + ' exceed 8 on ' + overAllocDetails.join(', '))}`);
+        }
+        // Save for each project
+        for (let i = 0; i < projectIds.length; i++) {
+          const projectId = projectIds[i];
+          const hours = Number(hoursList[i]) || 0;
+          const query = { employee: employee._id, project: projectId };
+          let existingSchedule = await AssignedSchedule.findOne(query);
+          let dailyHoursObj = {};
+          if (existingSchedule && existingSchedule.dailyHours) {
+            dailyHoursObj = { ...existingSchedule.dailyHours };
+          }
+          for (const { key: dateKey, dateObj } of dateKeys) {
+            dailyHoursObj[formatDateKey(dateKey)] = hours;
+          }
+          await AssignedSchedule.findOneAndUpdate(query, {
+            $setOnInsert: { employee: employee._id, project: projectId },
+            $set: { dailyHours: dailyHoursObj, startDate, endDate },
+          }, { upsert: true, new: true });
         }
       }
-      if (overAllocated) {
-        // Redirect with error message in query param
-        return res.redirect(`/assigned-resources?error=${encodeURIComponent('Over allocation: Total hours for ' + empCode + ' exceed 8 on ' + overAllocDetails.join(', '))}`);
-      }
-
-      // Proceed to save
-      for (let i = 0; i < projectIds.length; i++) {
-        const projectId = projectIds[i];
-        const hours = Number(hoursList[i]) || 0;
-        const query = { employee: employee._id, project: projectId };
-        let existingSchedule = await AssignedSchedule.findOne(query);
-        let dailyHoursObj = {};
-        if (existingSchedule && existingSchedule.dailyHours) {
-          dailyHoursObj = { ...existingSchedule.dailyHours };
-        }
-        for (const { key: dateKey, dateObj } of dateKeys) {
-          dailyHoursObj[formatDateKey(dateKey)] = hours;
-        }
-        await AssignedSchedule.findOneAndUpdate(query, {
-          $setOnInsert: { employee: employee._id, project: projectId },
-          $set: { dailyHours: dailyHoursObj, startDate, endDate },
-        }, { upsert: true, new: true });
-      }
-    } else {
+    } else if (req.body.project_id && req.body.hours) {
       // Multiple employees: single project
       const projectId = req.body.project_id;
       const hours = Number(req.body.hours) || 0;
@@ -1448,18 +1530,15 @@ app.post('/schedule', async (req, res) => {
           console.warn('Employee not found:', empCode);
           continue;
         }
-        // For each day, sum existing hours from all schedules for this employee
         let overAllocated = false;
         let overAllocDetails = [];
         for (const { key: dateKey, dateObj } of dateKeys) {
-          // Sum existing hours from all schedules for this employee on this day
           let existingSchedules = await AssignedSchedule.find({ employee: employee._id });
           let existingTotal = 0;
           for (const sched of existingSchedules) {
             let dh = sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)];
             existingTotal += Number(dh) || 0;
           }
-          // If updating existing schedule, subtract hours for this employee/project for this day
           let sched = await AssignedSchedule.findOne({ employee: employee._id, project: projectId });
           if (sched && sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)]) {
             existingTotal -= Number(sched.dailyHours[formatDateKey(dateKey)]) || 0;
@@ -1473,7 +1552,6 @@ app.post('/schedule', async (req, res) => {
         if (overAllocated) {
           return res.redirect(`/assigned-resources?error=${encodeURIComponent('Over allocation: Total hours for ' + empCode + ' exceed 8 on ' + overAllocDetails.join(', '))}`);
         }
-        // Proceed to save
         const query = { employee: employee._id, project: projectId };
         let existingSchedule = await AssignedSchedule.findOne(query);
         let dailyHoursObj = {};
@@ -1496,6 +1574,116 @@ app.post('/schedule', async (req, res) => {
   }
 });
 
+
+// Calendar View Route
+app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
+  try {
+    // Get filter params (optional, can extend for month/year selection)
+    const monthFilter = req.query.month || '';
+
+    // Build query for AssignedSchedule (all schedules)
+    const allSchedules = await AssignedSchedule.find()
+      .populate('employee')
+      .populate('project');
+
+
+    // Generate dateRange for the selected month (or current month if not selected), skipping weekends
+    let year, month;
+    if (monthFilter) {
+      const parts = monthFilter.split('-');
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10) - 1;
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth();
+    }
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const dateRange = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateObj = new Date(year, month, d);
+      const dayOfWeek = dateObj.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) continue; // skip Sunday/Saturday
+      const day = dateObj.getDate();
+      const monthName = dateObj.toLocaleString('default', { month: 'short' });
+      dateRange.push(`${day}-${monthName}`);
+    }
+
+    // Get all employees
+    const allEmployees = await Employee.find({}, 'empCode name division designation');
+
+
+    // Build empDayProjects: { empCode: { date: [ { projectName, hours } ] } }
+    const empDayProjects = {};
+    allSchedules.forEach(s => {
+      const empCode = s.employee?.empCode || 'N/A';
+      if (!empDayProjects[empCode]) empDayProjects[empCode] = {};
+      if (s.dailyHours && s.project && s.project.projectName) {
+        Object.entries(s.dailyHours).forEach(([date, hours]) => {
+          if (!empDayProjects[empCode][date]) empDayProjects[empCode][date] = [];
+          empDayProjects[empCode][date].push({
+            projectName: s.project.projectName,
+            hours: Number(hours) || 0
+          });
+        });
+      }
+    });
+
+    res.render('calendar-view', {
+      year: year,
+      month: month + 1, // for display
+      dateRange,
+      allEmployees,
+      empDayProjects,
+      layout: 'sidebar-layout',
+      title: 'Resource Calendar View'
+    });
+  } catch (err) {
+    console.error('Error loading calendar view:', err);
+    res.status(500).send('Internal Server Error');
+  }
+});
+
+
+// (Place this at the end of the file, after all middleware and routes, but before app.listen)
+
+// API endpoint for drag-fill calendar updates
+app.post('/api/calendar-drag-fill', async (req, res) => {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ success: false, error: 'No updates provided.' });
+    }
+    // For each update: { empCode, date, hours }
+    for (const upd of updates) {
+      const { empCode, date, hours } = upd;
+      if (!empCode || !date) continue;
+      // Find employee by empCode
+      const employee = await Employee.findOne({ empCode });
+      if (!employee) continue;
+      // Find all schedules for this employee on this date
+      const schedules = await AssignedSchedule.find({ employee: employee._id });
+      let found = false;
+      for (const sched of schedules) {
+        if (sched.dailyHours && sched.dailyHours[date] !== undefined) {
+          sched.dailyHours[date] = parseFloat(hours);
+          await sched.save();
+          found = true;
+        }
+      }
+      // If not found in any schedule, update the first schedule (or create one if none exist)
+      if (!found && schedules.length > 0) {
+        schedules[0].dailyHours[date] = parseFloat(hours);
+        await schedules[0].save();
+      }
+      // If no schedule exists, skip (or optionally create a new one)
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error in /api/calendar-drag-fill:', err);
+    res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
 
 
 // Logout

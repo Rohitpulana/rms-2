@@ -1,0 +1,187 @@
+<% // calendar-view.ejs - Resource Calendar View
+// Assumes variables: year, month, dateRange, allEmployees, empDayTotals are provided from the server
+%>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Resource Planning Board</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+<div class="container-fluid mt-4">
+  <!-- <h2 class="mb-4">Resource Planning Board <small class="text-muted">(<%= year %> - <%= month %>)</small></h2> -->
+  <div class="mb-3 d-flex align-items-center">
+    <form method="get" action="/calendar-view" class="form-inline mr-3">
+      <label for="monthSelect" class="mr-2">Month:</label>
+      <input type="month" id="monthSelect" name="month" value="<%= year %>-<%= month.toString().padStart(2, '0') %>" class="form-control form-control-sm mr-2" style="width: 160px;">
+      <button type="submit" class="btn btn-primary btn-sm">Go</button>
+    </form>
+    <a href="/assigned-resources" class="btn btn-secondary btn-sm ml-2">Back to Table View</a>
+  </div>
+  <div class="table-responsive board-style-calendar">
+    <table class="table table-bordered table-sm board-table">
+      <thead class="thead-light">
+        <tr>
+          <th style="min-width: 180px;">Employee</th>
+          <% dateRange.forEach(function(date) { %>
+            <th class="text-center" style="min-width: 48px;"><%= date %></th>
+          <% }); %>
+        </tr>
+      </thead>
+      <tbody>
+        <% function getBlockColor(percent) {
+             if (percent >= 100) return '#17befc'; // green
+             if (percent >= 75) return '#fa686d'; // sky blue
+             if (percent >= 50) return '#fa686d'; // orange
+             if (percent > 0) return '#fa686d'; // red
+             return '#f1f3f6'; // empty bg
+           }
+        %>
+        <% allEmployees.forEach(function(emp) { %>
+          <tr>
+            <td class="emp-cell">
+              <div class="emp-name"><%= emp.name %></div>
+              <div class="emp-meta text-muted small"><%= emp.empCode %> | <%= emp.designation %></div>
+            </td>
+            <% dateRange.forEach(function(date) { 
+              var blocks = (empDayProjects && empDayProjects[emp.empCode] && empDayProjects[emp.empCode][date]) || [];
+              var totalHours = 0;
+              blocks.forEach(function(block) { totalHours += block.hours; });
+              var percentFilled = Math.min(100, Math.round((totalHours/8)*100));
+            %>
+            <td class="calendar-cell<% if (blocks.length === 0 || totalHours === 0) { %> no-task<% } %>" style="padding: 0.2rem 0.1rem; min-width: 120px; height: 70px; vertical-align: middle;">
+              <div class="fixed-block" style="width:100%;min-height:60px;height:100%;position:relative;background:#f1f3f6;border-radius:10px;overflow:visible;display:flex;flex-direction:column;gap:8px;justify-content:center;align-items:center;padding:8px 0;">
+                <% if (blocks.length > 0 && totalHours > 0) { %>
+                  <% blocks.forEach(function(block) { %>
+                    <div class="project-stack-block" style="width:100%;height:32px;background:<%= getBlockColor(percentFilled) %>;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.10);display:flex;align-items:center;justify-content:space-between;position:relative;overflow:hidden;transition:width 0.2s;margin:0 auto;">
+                      <span class="block-title" style="color:#fff;text-shadow:0 1px 6px #000a,0 0 2px #000a;padding-left:16px;font-size:1.15em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;max-width:80%;font-weight:600;"> <%= block.projectName %></span>
+                      <span class="block-hours" style="font-weight:700;color:#fff;text-shadow:0 1px 6px #000a,0 0 2px #000a;padding-right:16px;font-size:1.15em;"> <%= block.hours %>h</span>
+                    </div>
+                  <% }); %>
+                <% } else { %>
+                  <div class="block-content" style="position:relative;z-index:2;color:#888;padding:2px 6px;font-size:0.95em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                    <span class="block-title">-</span>
+                  </div>
+                <% } %>
+              </div>
+            </td>
+            <% }); %>
+          </tr>
+        <% }); %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<style>
+.board-style-calendar {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+}
+.board-table th, .board-table td {
+  vertical-align: middle;
+  text-align: center;
+  padding: 0.35rem 0.5rem;
+}
+.emp-cell {
+  text-align: left;
+  background: #f1f3f6;
+  border-right: 2px solid #dee2e6;
+}
+.emp-name {
+  font-weight: 600;
+}
+.hours-block {
+  display: inline-block;
+  min-width: 32px;
+  border-radius: 6px;
+  padding: 2px 0;
+  font-size: 1rem;
+  font-weight: 500;
+}
+.fixed-block {
+  border-radius: 7px;
+  min-height: 32px;
+  height: 32px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  position: relative;
+  overflow: hidden;
+  background: #f1f3f6;
+}
+.block-content {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 500;
+  font-size: 0.97em;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-shadow: 0 1px 4px #000a, 0 0 2px #000a;
+}
+.block-title {
+  font-weight: 500;
+  font-size: 0.97em;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-shadow: 0 1px 4px #000a, 0 0 2px #000a;
+}
+.block-hours {
+  font-size: 0.97em;
+  margin-left: 8px;
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 1px 4px #000a, 0 0 2px #000a;
+}
+.hours-block.empty {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+  border-radius: 7px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.calendar-cell {
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+  background: #fff;
+}
+.calendar-cell:hover {
+  box-shadow: 0 0 0 2px #007bff33;
+  z-index: 2;
+  position: relative;
+}
+</style>
+
+<!-- <style>
+/* Grey background for cells with no assigned task */
+.calendar-cell.no-task, .calendar-cell.no-task .fixed-block {
+  background: #e0e0e0 !important;
+  color: #888 !important;
+}
+.calendar-cell.no-task .block-title, .calendar-cell.no-task .block-hours {
+  color: #888 !important;
+  text-shadow: none !important;
+}
+</style> -->
+
+<script>
+// Enable Bootstrap tooltips
+$(function () {
+  $('[data-toggle="tooltip"]').tooltip({ container: 'body' });
+});
+</script>
+</body>
+</html>
+
+
