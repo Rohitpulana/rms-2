@@ -98,9 +98,13 @@ schedules.forEach(s => {
                 <label for="projectFilter" class="form-label">Project</label>
                 <select id="projectFilter" name="project" class="form-select">
                     <option value="">All Projects</option>
+                  
                     <% allProjects?.forEach(proj => { %>
                         <option value="<%= proj.projectName %>" <%= (projectFilter === proj.projectName ? 'selected' : '') %>>
-                            <%= proj.projectName %> <% if (proj.projectManager) { %> | Manager: <%= proj.projectManager %> <% } %>
+                            <%= proj.projectName %>
+                            | Manager: <%= proj.projectManager %>
+                            | CBSL: <%= proj.cbslClient %>
+                            | DIH: <%= proj.dihClient %>
                         </option>
                     <% }) %>
                 </select>

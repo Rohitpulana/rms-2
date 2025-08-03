@@ -206,7 +206,9 @@ app.get('/dashboard/manager/calendar-view', (req, res) => {
                         if (!empDayProjects[empCode][dateKey]) empDayProjects[empCode][dateKey] = [];
                         empDayProjects[empCode][dateKey].push({
                             projectName: s.project.projectName,
-                            hours: s.dailyHours[dateKey]
+                            projectId: s.project._id,
+                            assignmentId: s._id,
+                            hours: Number(s.dailyHours[dateKey]) || 0
                         });
                     });
                 }
@@ -362,7 +364,7 @@ app.get('/dashboard/manager/assigned-resources', isAuth, async (req, res) => {
 
     // Get all employees and projects for filter dropdowns
     const allEmployees = await Employee.find({}, 'empCode name division designation');
-    const allProjects = await ProjectMaster.find({}, 'projectName projectManager');
+    const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
 
     res.render('manager-assigned-resources', {
       schedules: uniqueSchedules,
@@ -788,7 +790,7 @@ app.post('/upload-project-master', isAuth, isAdmin, upload.single('projectFile')
           endDate,
           projectManager: row['Project Manager'],
           cbslClient: row['CBSL Client'],
-          dihClient: row['DIH Client']
+          dihClient: row['DIH Division']
         });
       }
     }
@@ -966,7 +968,7 @@ app.get('/assigned-resources', isAuth, isAdmin, async (req, res) => {
 
     // Get all employees and projects for filter dropdowns
     const allEmployees = await Employee.find({}, 'empCode name division designation');
-    const allProjects = await ProjectMaster.find({}, 'projectName projectManager');
+const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
 
     res.render('assigned-resources', {
       schedules: uniqueSchedules,
@@ -1613,7 +1615,7 @@ app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
     const allEmployees = await Employee.find({}, 'empCode name division designation');
 
 
-    // Build empDayProjects: { empCode: { date: [ { projectName, hours } ] } }
+    // Build empDayProjects: { empCode: { date: [ { projectName, hours, projectId, assignmentId } ] } }
     const empDayProjects = {};
     allSchedules.forEach(s => {
       const empCode = s.employee?.empCode || 'N/A';
@@ -1623,6 +1625,8 @@ app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
           if (!empDayProjects[empCode][date]) empDayProjects[empCode][date] = [];
           empDayProjects[empCode][date].push({
             projectName: s.project.projectName,
+            projectId: s.project._id,
+            assignmentId: s._id,
             hours: Number(hours) || 0
           });
         });
@@ -1646,6 +1650,237 @@ app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
 
 
 // (Place this at the end of the file, after all middleware and routes, but before app.listen)
+
+// API endpoint for updating assignments via drag-and-drop
+app.post('/api/update-assignment', isAuth, async (req, res) => {
+  try {
+    console.log('Received assignment update request:', req.body);
+    
+    const { 
+      assignmentId, 
+      projectId, 
+      oldEmpCode, 
+      oldDate, 
+      newEmpCode, 
+      newDate, 
+      hours, 
+      projectName 
+    } = req.body;
+
+    // Find the source and target employees
+    const oldEmployee = await Employee.findOne({ empCode: oldEmpCode });
+    const newEmployee = await Employee.findOne({ empCode: newEmpCode });
+    
+    if (!oldEmployee) {
+      return res.json({ success: false, message: `Source employee ${oldEmpCode} not found` });
+    }
+    if (!newEmployee) {
+      return res.json({ success: false, message: `Target employee ${newEmpCode} not found` });
+    }
+
+    // Find the assignment schedule for the source employee
+    let sourceSchedule = null;
+    if (assignmentId) {
+      sourceSchedule = await AssignedSchedule.findById(assignmentId).populate('project');
+    }
+    
+    if (!sourceSchedule) {
+      // Find by employee and check if has hours on the specific date
+      const schedules = await AssignedSchedule.find({ employee: oldEmployee._id }).populate('project');
+      for (let sched of schedules) {
+        if (sched.dailyHours && sched.dailyHours[oldDate] && parseFloat(sched.dailyHours[oldDate]) > 0) {
+          sourceSchedule = sched;
+          break;
+        }
+      }
+    }
+
+    if (!sourceSchedule || !sourceSchedule.dailyHours[oldDate]) {
+      return res.json({ success: false, message: `No assignment found for ${oldEmpCode} on ${oldDate}` });
+    }
+
+    // Remove hours from source date
+    const originalHours = sourceSchedule.dailyHours[oldDate];
+    delete sourceSchedule.dailyHours[oldDate];
+    
+    // Mark the field as modified for Mongoose
+    sourceSchedule.markModified('dailyHours');
+    
+    // Find or create target schedule for the same project
+    let targetSchedule = await AssignedSchedule.findOne({
+      employee: newEmployee._id,
+      project: sourceSchedule.project._id
+    });
+
+    if (!targetSchedule) {
+      // Create new schedule for target employee
+      targetSchedule = new AssignedSchedule({
+        employee: newEmployee._id,
+        project: sourceSchedule.project._id,
+        practice: sourceSchedule.practice,
+        dailyHours: {},
+        role: sourceSchedule.role,
+        startDate: sourceSchedule.startDate,
+        endDate: sourceSchedule.endDate,
+        scheduledBy: 'Drag-Drop System',
+        scheduledAt: new Date()
+      });
+    }
+
+    // Add hours to target date
+    if (!targetSchedule.dailyHours) {
+      targetSchedule.dailyHours = {};
+    }
+    targetSchedule.dailyHours[newDate] = parseFloat(hours);
+    
+    // Mark the field as modified for Mongoose
+    targetSchedule.markModified('dailyHours');
+
+    // Save both schedules
+    await sourceSchedule.save();
+    await targetSchedule.save();
+
+    console.log('Assignment updated successfully');
+    res.json({ 
+      success: true, 
+      message: `Successfully moved ${hours}h from ${oldEmpCode} to ${newEmpCode}` 
+    });
+
+  } catch (error) {
+    console.error('Error updating assignment:', error);
+    res.json({ 
+      success: false, 
+      message: `Internal server error: ${error.message}` 
+    });
+  }
+});
+
+// API endpoint for drag-fill feature
+app.post('/api/drag-fill', isAuth, async (req, res) => {
+  try {
+    console.log('Received drag-fill request:', req.body);
+    
+    const { 
+      sourceEmpCode, 
+      sourceDate, 
+      projectId,
+      targetCells, 
+      hours,
+      projectName 
+    } = req.body;
+
+    // Find source employee
+    const sourceEmployee = await Employee.findOne({ empCode: sourceEmpCode });
+    if (!sourceEmployee) {
+      return res.json({ success: false, message: 'Source employee not found' });
+    }
+
+    // Find the project to assign
+    let project;
+    if (projectId) {
+      project = await ProjectMaster.findById(projectId);
+      if (!project) {
+        return res.json({ success: false, message: 'Project not found' });
+      }
+    } else {
+      // Fallback: find project by name
+      project = await ProjectMaster.findOne({ projectName });
+      if (!project) {
+        return res.json({ success: false, message: 'Project not found' });
+      }
+    }
+
+    let updatedCells = 0;
+    let failedCells = [];
+
+    // Process each target cell
+    for (const cell of targetCells) {
+      const { empCode, date } = cell;
+      
+      try {
+        // Find target employee
+        const targetEmployee = await Employee.findOne({ empCode });
+        if (!targetEmployee) {
+          failedCells.push(`${empCode} (employee not found)`);
+          continue;
+        }
+
+        // Check if employee already has assignments for this date (8 hour limit)
+        const existingSchedules = await AssignedSchedule.find({ employee: targetEmployee._id });
+        let totalHoursOnDate = 0;
+        
+        existingSchedules.forEach(schedule => {
+          if (schedule.dailyHours && schedule.dailyHours[date]) {
+            totalHoursOnDate += parseFloat(schedule.dailyHours[date]);
+          }
+        });
+        
+        if (totalHoursOnDate + parseFloat(hours) > 8) {
+          failedCells.push(`${empCode} on ${date} (would exceed 8h limit: ${totalHoursOnDate}h + ${hours}h)`);
+          continue;
+        }
+
+        // Find or create target schedule for the project
+        let targetSchedule = await AssignedSchedule.findOne({
+          employee: targetEmployee._id,
+          project: project._id
+        });
+
+        if (!targetSchedule) {
+          // Create new schedule for target employee
+          targetSchedule = new AssignedSchedule({
+            employee: targetEmployee._id,
+            project: project._id,
+            dailyHours: {},
+            scheduledBy: 'Drag-Fill System',
+            scheduledAt: new Date()
+          });
+        }
+
+        // Add hours to target date
+        if (!targetSchedule.dailyHours) {
+          targetSchedule.dailyHours = {};
+        }
+        
+        // If date already exists, add to existing hours, otherwise set new hours
+        if (targetSchedule.dailyHours[date]) {
+          targetSchedule.dailyHours[date] = parseFloat(targetSchedule.dailyHours[date]) + parseFloat(hours);
+        } else {
+          targetSchedule.dailyHours[date] = parseFloat(hours);
+        }
+        
+        // Mark the field as modified for Mongoose
+        targetSchedule.markModified('dailyHours');
+        await targetSchedule.save();
+        
+        updatedCells++;
+      } catch (cellError) {
+        console.error(`Error processing cell ${empCode} ${date}:`, cellError);
+        failedCells.push(`${empCode} on ${date} (processing error)`);
+      }
+    }
+
+    let message = `Successfully filled ${updatedCells} cells with ${hours}h of "${project.projectName}"`;
+    if (failedCells.length > 0) {
+      message += `. Failed: ${failedCells.join(', ')}`;
+    }
+
+    console.log(`Drag-fill completed: ${updatedCells} cells updated, ${failedCells.length} failed`);
+    res.json({ 
+      success: true, 
+      message: message,
+      updatedCells: updatedCells,
+      failedCells: failedCells
+    });
+
+  } catch (error) {
+    console.error('Error in drag-fill:', error);
+    res.json({ 
+      success: false, 
+      message: `Internal server error: ${error.message}` 
+    });
+  }
+});
 
 // API endpoint for drag-fill calendar updates
 app.post('/api/calendar-drag-fill', async (req, res) => {
@@ -1682,6 +1917,461 @@ app.post('/api/calendar-drag-fill', async (req, res) => {
   } catch (err) {
     console.error('Error in /api/calendar-drag-fill:', err);
     res.status(500).json({ success: false, error: 'Server error' });
+  }
+});
+
+// API endpoint for multi-project drag-fill feature
+app.post('/api/multi-project-drag-fill', isAuth, async (req, res) => {
+  try {
+    console.log('Received multi-project drag-fill request:', req.body);
+    
+    const { 
+      sourceEmpCode, 
+      sourceDate, 
+      projects,
+      targetCells
+    } = req.body;
+
+    // Find source employee
+    const sourceEmployee = await Employee.findOne({ empCode: sourceEmpCode });
+    if (!sourceEmployee) {
+      return res.json({ success: false, message: 'Source employee not found' });
+    }
+
+    let updatedCells = 0;
+    let failedCells = [];
+
+    // Process each target cell
+    for (const cell of targetCells) {
+      const { empCode, date } = cell;
+      
+      try {
+        // Find target employee
+        const targetEmployee = await Employee.findOne({ empCode });
+        if (!targetEmployee) {
+          failedCells.push(`${empCode} (employee not found)`);
+          continue;
+        }
+
+        // Check total hours for the date
+        const existingSchedules = await AssignedSchedule.find({ employee: targetEmployee._id });
+        let totalHoursOnDate = 0;
+        
+        existingSchedules.forEach(schedule => {
+          if (schedule.dailyHours && schedule.dailyHours[date]) {
+            totalHoursOnDate += parseFloat(schedule.dailyHours[date]);
+          }
+        });
+
+        // Calculate total hours for all projects
+        const totalProjectHours = projects.reduce((sum, proj) => sum + parseFloat(proj.hours), 0);
+        
+        if (totalHoursOnDate + totalProjectHours > 8) {
+          failedCells.push(`${empCode} on ${date} (would exceed 8h limit: ${totalHoursOnDate}h + ${totalProjectHours}h)`);
+          continue;
+        }
+
+        // Process each project
+        for (const projectData of projects) {
+          const project = await ProjectMaster.findById(projectData.projectId);
+          if (!project) {
+            continue;
+          }
+
+          // Find or create target schedule for the project
+          let targetSchedule = await AssignedSchedule.findOne({
+            employee: targetEmployee._id,
+            project: project._id
+          });
+
+          if (!targetSchedule) {
+            targetSchedule = new AssignedSchedule({
+              employee: targetEmployee._id,
+              project: project._id,
+              dailyHours: {},
+              scheduledBy: 'Multi-Project Drag-Fill System',
+              scheduledAt: new Date()
+            });
+          }
+
+          // Add hours to target date
+          if (!targetSchedule.dailyHours) {
+            targetSchedule.dailyHours = {};
+          }
+          
+          if (targetSchedule.dailyHours[date]) {
+            targetSchedule.dailyHours[date] = parseFloat(targetSchedule.dailyHours[date]) + parseFloat(projectData.hours);
+          } else {
+            targetSchedule.dailyHours[date] = parseFloat(projectData.hours);
+          }
+          
+          targetSchedule.markModified('dailyHours');
+          await targetSchedule.save();
+        }
+        
+        updatedCells++;
+      } catch (cellError) {
+        console.error(`Error processing cell ${empCode} ${date}:`, cellError);
+        failedCells.push(`${empCode} on ${date} (processing error)`);
+      }
+    }
+
+    let message = `Successfully filled ${updatedCells} cells with ${projects.length} projects`;
+    if (failedCells.length > 0) {
+      message += `. Failed: ${failedCells.join(', ')}`;
+    }
+
+    console.log(`Multi-project drag-fill completed: ${updatedCells} cells updated, ${failedCells.length} failed`);
+    res.json({ 
+      success: true, 
+      message: message,
+      updatedCells: updatedCells,
+      failedCells: failedCells
+    });
+
+  } catch (error) {
+    console.error('Error in multi-project drag-fill:', error);
+    res.json({ 
+      success: false, 
+      message: `Internal server error: ${error.message}` 
+    });
+  }
+});
+
+// API endpoint for row drag-fill feature
+app.post('/api/row-drag-fill', isAuth, async (req, res) => {
+  try {
+    console.log('Received row drag-fill request:', req.body);
+    
+    const { 
+      sourceEmpCode, 
+      rowProjects,
+      targetEmployees
+    } = req.body;
+
+    // Find source employee
+    const sourceEmployee = await Employee.findOne({ empCode: sourceEmpCode });
+    if (!sourceEmployee) {
+      return res.json({ success: false, message: 'Source employee not found' });
+    }
+
+    let updatedEmployees = 0;
+    let failedEmployees = [];
+
+    // Process each target employee
+    for (const targetEmpCode of targetEmployees) {
+      try {
+        // Find target employee
+        const targetEmployee = await Employee.findOne({ empCode: targetEmpCode });
+        if (!targetEmployee) {
+          failedEmployees.push(`${targetEmpCode} (employee not found)`);
+          continue;
+        }
+
+        let employeeUpdated = false;
+
+        // Process each project and its dates from the source row
+        for (const projectData of rowProjects) {
+          const project = await ProjectMaster.findById(projectData.projectId);
+          if (!project) {
+            continue;
+          }
+
+          // Find or create target schedule for the project
+          let targetSchedule = await AssignedSchedule.findOne({
+            employee: targetEmployee._id,
+            project: project._id
+          });
+
+          if (!targetSchedule) {
+            targetSchedule = new AssignedSchedule({
+              employee: targetEmployee._id,
+              project: project._id,
+              dailyHours: {},
+              scheduledBy: 'Row Drag-Fill System',
+              scheduledAt: new Date()
+            });
+          }
+
+          // Copy all dates and hours for this project
+          for (const [date, hours] of Object.entries(projectData.dates)) {
+            // Check if adding these hours would exceed 8h limit for this date
+            const existingSchedules = await AssignedSchedule.find({ employee: targetEmployee._id });
+            let totalHoursOnDate = 0;
+            
+            existingSchedules.forEach(schedule => {
+              if (schedule.dailyHours && schedule.dailyHours[date] && schedule._id.toString() !== targetSchedule._id.toString()) {
+                totalHoursOnDate += parseFloat(schedule.dailyHours[date]);
+              }
+            });
+
+            if (totalHoursOnDate + parseFloat(hours) <= 8) {
+              if (!targetSchedule.dailyHours) {
+                targetSchedule.dailyHours = {};
+              }
+              targetSchedule.dailyHours[date] = parseFloat(hours);
+              employeeUpdated = true;
+            }
+          }
+
+          if (employeeUpdated) {
+            targetSchedule.markModified('dailyHours');
+            await targetSchedule.save();
+          }
+        }
+        
+        if (employeeUpdated) {
+          updatedEmployees++;
+        }
+      } catch (empError) {
+        console.error(`Error processing employee ${targetEmpCode}:`, empError);
+        failedEmployees.push(`${targetEmpCode} (processing error)`);
+      }
+    }
+
+    let message = `Successfully copied row data to ${updatedEmployees} employees`;
+    if (failedEmployees.length > 0) {
+      message += `. Failed: ${failedEmployees.join(', ')}`;
+    }
+
+    console.log(`Row drag-fill completed: ${updatedEmployees} employees updated, ${failedEmployees.length} failed`);
+    res.json({ 
+      success: true, 
+      message: message,
+      updatedEmployees: updatedEmployees,
+      failedEmployees: failedEmployees
+    });
+
+  } catch (error) {
+    console.error('Error in row drag-fill:', error);
+    res.json({ 
+      success: false, 
+      message: `Internal server error: ${error.message}` 
+    });
+  }
+});
+
+// API endpoint to get all projects for dropdown
+app.get('/api/projects', isAuth, async (req, res) => {
+  try {
+    const projects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient').sort({ projectName: 1 });
+    res.json(projects);
+  } catch (error) {
+    console.error('Error fetching projects:', error);
+    res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+});
+
+// API endpoint to get current assignments for an employee on a specific date
+app.get('/api/assignments/:empCode/:date', isAuth, async (req, res) => {
+  try {
+    const { empCode, date } = req.params;
+    
+    const employee = await Employee.findOne({ empCode });
+    if (!employee) {
+      return res.json([]);
+    }
+    
+    const schedules = await AssignedSchedule.find({ employee: employee._id }).populate('project');
+    const assignments = [];
+    
+    schedules.forEach(schedule => {
+      if (schedule.dailyHours && schedule.dailyHours[date] && schedule.project) {
+        assignments.push({
+          assignmentId: schedule._id,
+          projectId: schedule.project._id,
+          projectName: schedule.project.projectName,
+          hours: schedule.dailyHours[date]
+        });
+      }
+    });
+    
+    res.json(assignments);
+  } catch (error) {
+    console.error('Error fetching assignments:', error);
+    res.status(500).json({ error: 'Failed to fetch assignments' });
+  }
+});
+
+// API endpoint to create new assignment
+app.post('/api/assignments', isAuth, async (req, res) => {
+  try {
+    const { empCode, date, projectId, hours } = req.body;
+    
+    if (!empCode || !date || !projectId || !hours) {
+      return res.json({ success: false, message: 'Missing required fields' });
+    }
+    
+    if (hours <= 0 || hours > 8) {
+      return res.json({ success: false, message: 'Hours must be between 0.5 and 8' });
+    }
+    
+    // Find employee
+    const employee = await Employee.findOne({ empCode });
+    if (!employee) {
+      return res.json({ success: false, message: 'Employee not found' });
+    }
+    
+    // Find project
+    const project = await ProjectMaster.findById(projectId);
+    if (!project) {
+      return res.json({ success: false, message: 'Project not found' });
+    }
+    
+    // Check if employee already has assignments for this date (8 hour limit)
+    const existingSchedules = await AssignedSchedule.find({ employee: employee._id });
+    let totalHoursOnDate = 0;
+    
+    existingSchedules.forEach(schedule => {
+      if (schedule.dailyHours && schedule.dailyHours[date]) {
+        totalHoursOnDate += parseFloat(schedule.dailyHours[date]);
+      }
+    });
+    
+    if (totalHoursOnDate + parseFloat(hours) > 8) {
+      return res.json({ 
+        success: false, 
+        message: `Cannot exceed 8 hours per day. Current allocation: ${totalHoursOnDate}h. Available: ${8 - totalHoursOnDate}h` 
+      });
+    }
+    
+    // Find existing schedule for this employee and project, or create new one
+    let schedule = await AssignedSchedule.findOne({
+      employee: employee._id,
+      project: project._id
+    });
+    
+    if (!schedule) {
+      schedule = new AssignedSchedule({
+        employee: employee._id,
+        project: project._id,
+        dailyHours: {},
+        scheduledBy: 'Calendar System',
+        scheduledAt: new Date()
+      });
+    }
+    
+    // Add or update hours for the specific date
+    if (!schedule.dailyHours) {
+      schedule.dailyHours = {};
+    }
+    
+    if (schedule.dailyHours[date]) {
+      // Update existing hours
+      schedule.dailyHours[date] = parseFloat(hours);
+    } else {
+      // Add new hours
+      schedule.dailyHours[date] = parseFloat(hours);
+    }
+    
+    schedule.markModified('dailyHours');
+    await schedule.save();
+    
+    res.json({ 
+      success: true, 
+      message: `Successfully assigned ${hours}h of ${project.projectName} to ${employee.name} on ${date}` 
+    });
+    
+  } catch (error) {
+    console.error('Error creating assignment:', error);
+    res.json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// API endpoint to update assignment
+app.put('/api/assignments/:assignmentId', isAuth, async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const { hours, date } = req.body;
+    
+    if (!hours || hours <= 0 || hours > 8) {
+      return res.json({ success: false, message: 'Hours must be between 0.5 and 8' });
+    }
+    if (!date) {
+      return res.json({ success: false, message: 'Date is required to update assignment.' });
+    }
+    
+    const schedule = await AssignedSchedule.findById(assignmentId).populate('employee project');
+    if (!schedule) {
+      return res.json({ success: false, message: 'Assignment not found' });
+    }
+    
+    if (!schedule.dailyHours) {
+      schedule.dailyHours = {};
+    }
+    
+    // Check total hours constraint for the specified date
+    const employee = schedule.employee;
+    const allSchedules = await AssignedSchedule.find({ employee: employee._id });
+    let totalHoursOnDate = 0;
+    
+    allSchedules.forEach(sched => {
+      if (sched.dailyHours && sched.dailyHours[date]) {
+        if (sched._id.toString() !== assignmentId) {
+          totalHoursOnDate += parseFloat(sched.dailyHours[date]);
+        }
+      }
+    });
+    
+    if (totalHoursOnDate + parseFloat(hours) > 8) {
+      return res.json({ 
+        success: false, 
+        message: `Cannot exceed 8 hours per day. Other assignments: ${totalHoursOnDate}h. Available: ${8 - totalHoursOnDate}h` 
+      });
+    }
+    
+    schedule.dailyHours[date] = parseFloat(hours);
+    schedule.markModified('dailyHours');
+    await schedule.save();
+    
+    res.json({ 
+      success: true, 
+      message: `Successfully updated assignment to ${hours}h on ${date}` 
+    });
+    
+  } catch (error) {
+    console.error('Error updating assignment:', error);
+    res.json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// API endpoint to delete assignment
+app.delete('/api/assignments/:assignmentId', isAuth, async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const { empCode, date } = req.body;
+    
+    const schedule = await AssignedSchedule.findById(assignmentId).populate('employee project');
+    if (!schedule) {
+      return res.json({ success: false, message: 'Assignment not found' });
+    }
+    
+    // Remove the specific date from dailyHours
+    if (schedule.dailyHours && schedule.dailyHours[date]) {
+      delete schedule.dailyHours[date];
+      schedule.markModified('dailyHours');
+      
+      // If no more dates are scheduled, delete the entire schedule
+      if (Object.keys(schedule.dailyHours).length === 0) {
+        await AssignedSchedule.findByIdAndDelete(assignmentId);
+        res.json({ 
+          success: true, 
+          message: `Successfully deleted assignment and removed empty schedule` 
+        });
+      } else {
+        await schedule.save();
+        res.json({ 
+          success: true, 
+          message: `Successfully removed assignment for ${date}` 
+        });
+      }
+    } else {
+      res.json({ success: false, message: 'Assignment for specified date not found' });
+    }
+    
+  } catch (error) {
+    console.error('Error deleting assignment:', error);
+    res.json({ success: false, message: 'Internal server error' });
   }
 });
 

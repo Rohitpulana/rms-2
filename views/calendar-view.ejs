@@ -8,8 +8,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
 <body>
 <div class="container-fluid mt-4">
@@ -20,7 +22,123 @@
       <input type="month" id="monthSelect" name="month" value="<%= year %>-<%= month.toString().padStart(2, '0') %>" class="form-control form-control-sm mr-2" style="width: 160px;">
       <button type="submit" class="btn btn-primary btn-sm">Go</button>
     </form>
-    <a href="/assigned-resources" class="btn btn-secondary btn-sm ml-2">Back to Table View</a>
+    <a href="/assigned-resources" class="btn btn-secondary btn-sm ml-2">Export to Excel</a>
+    <button id="toggleDragMode" class="btn btn-info btn-sm ml-2">
+      <i class="fas fa-arrows-alt"></i> Enable Drag Mode
+    </button>
+    <button id="toggleDragFill" class="btn btn-success btn-sm ml-2">
+      <i class="fas fa-fill"></i> Enable Drag Fill
+    </button>
+  </div>
+
+  <!-- Success/Error Toast -->
+  <div id="toast" class="toast-container" style="position: fixed; top: 20px; right: 20px; z-index: 9999;">
+    <div id="successToast" class="alert alert-success" style="display: none;">
+      <i class="fas fa-check-circle"></i> <span id="successMessage"></span>
+    </div>
+    <div id="errorToast" class="alert alert-danger" style="display: none;">
+      <i class="fas fa-exclamation-circle"></i> <span id="errorMessage"></span>
+    </div>
+  </div>
+
+  <!-- Project Assignment Modal -->
+  <div class="modal fade" id="assignmentModal" tabindex="-1" aria-labelledby="assignmentModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="assignmentModalLabel">Assign Project</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="assignmentForm">
+            <div class="mb-3">
+              <label class="form-label">Employee:</label>
+              <input type="text" id="modalEmployeeName" class="form-control" readonly>
+              <input type="hidden" id="modalEmpCode">
+              <input type="hidden" id="modalDate">
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Date:</label>
+              <input type="text" id="modalDateDisplay" class="form-control" readonly>
+            </div>
+
+            <div class="mb-3">
+              <label for="projectSelect" class="form-label">Project:</label>
+              <select id="projectSelect" class="form-select" required>
+                <option value="">Select a project...</option>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label for="hoursInput" class="form-label">Hours:</label>
+              <input type="number" id="hoursInput" class="form-control" min="0.5" max="8" step="0.5" required>
+              <div class="form-text">
+                <span id="remainingHours">Remaining hours: 8</span>
+              </div>
+            </div>
+
+            <div id="existingAssignments" class="mb-3" style="display: none;">
+              <label class="form-label">Current Assignments:</label>
+              <div id="assignmentsList" class="border rounded p-2 bg-light">
+                <!-- Current assignments will be displayed here -->
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="saveAssignment" class="btn btn-primary">Save Assignment</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Assignment Modal -->
+  <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editModalLabel">Edit Assignment</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <form id="editForm">
+            <div class="mb-3">
+              <label class="form-label">Employee:</label>
+              <input type="text" id="editEmployeeName" class="form-control" readonly>
+              <input type="hidden" id="editEmpCode">
+              <input type="hidden" id="editDate">
+              <input type="hidden" id="editAssignmentId">
+              <input type="hidden" id="editProjectId">
+            </div>
+            
+            <div class="mb-3">
+              <label class="form-label">Date:</label>
+              <input type="text" id="editDateDisplay" class="form-control" readonly>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Project:</label>
+              <input type="text" id="editProjectName" class="form-control" readonly>
+            </div>
+
+            <div class="mb-3">
+              <label for="editHoursInput" class="form-label">Hours:</label>
+              <input type="number" id="editHoursInput" class="form-control" min="0.5" max="8" step="0.5" required>
+              <div class="form-text">
+                <span id="editRemainingHours">Remaining hours: 8</span>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-danger" id="deleteAssignment">Delete</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" id="updateAssignment" class="btn btn-primary">Update</button>
+        </div>
+      </div>
+    </div>
   </div>
   <div class="table-responsive board-style-calendar">
     <table class="table table-bordered table-sm board-table">
@@ -34,11 +152,11 @@
       </thead>
       <tbody>
         <% function getBlockColor(percent) {
-             if (percent >= 100) return '#17befc'; // green
-             if (percent >= 75) return '#fa686d'; // sky blue
-             if (percent >= 50) return '#fa686d'; // orange
-             if (percent > 0) return '#fa686d'; // red
-             return '#f1f3f6'; // empty bg
+             if (percent >= 100) return '#17befc'; // fully allocated
+             if (percent >= 75) return '#fa686d'; // mostly allocated  
+             if (percent >= 50) return '#fa686d'; //  half allocated
+             if (percent > 0) return '#fa686d'; // partially allocated
+             return '#f8f9fa'; // light gray - empty
            }
         %>
         <% allEmployees.forEach(function(emp) { %>
@@ -53,18 +171,84 @@
               blocks.forEach(function(block) { totalHours += block.hours; });
               var percentFilled = Math.min(100, Math.round((totalHours/8)*100));
             %>
-            <td class="calendar-cell<% if (blocks.length === 0 || totalHours === 0) { %> no-task<% } %>" style="padding: 0.2rem 0.1rem; min-width: 120px; height: 70px; vertical-align: middle;">
-              <div class="fixed-block" style="width:100%;min-height:60px;height:100%;position:relative;background:#f1f3f6;border-radius:10px;overflow:visible;display:flex;flex-direction:column;gap:8px;justify-content:center;align-items:center;padding:8px 0;">
+            <td class="calendar-cell<% if (blocks.length === 0 || totalHours === 0) { %> no-task<% } %> drop-zone clickable-cell" 
+                data-emp-code="<%= emp.empCode %>" 
+                data-emp-name="<%= emp.name %>"
+                data-date="<%= date %>" 
+                data-total-hours="<%= totalHours %>"
+                style="padding: 0.2rem 0.1rem; min-width: 120px; height: 70px; vertical-align: middle; cursor: pointer;">
+              <div class="fixed-block sortable-container" 
+                   style="width:100%;min-height:60px;height:100%;position:relative;
+                          background: #f1f3f6;
+                          border-radius:10px;overflow:hidden;display:flex;flex-direction:column;padding:2px;">
                 <% if (blocks.length > 0 && totalHours > 0) { %>
-                  <% blocks.forEach(function(block) { %>
-                    <div class="project-stack-block" style="width:100%;height:32px;background:<%= getBlockColor(percentFilled) %>;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.10);display:flex;align-items:center;justify-content:space-between;position:relative;overflow:hidden;transition:width 0.2s;margin:0 auto;">
-                      <span class="block-title" style="color:#fff;text-shadow:0 1px 6px #000a,0 0 2px #000a;padding-left:16px;font-size:1.15em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;max-width:80%;font-weight:600;"> <%= block.projectName %></span>
-                      <span class="block-hours" style="font-weight:700;color:#fff;text-shadow:0 1px 6px #000a,0 0 2px #000a;padding-right:16px;font-size:1.15em;"> <%= block.hours %>h</span>
+                  <% blocks.forEach(function(block, index) { 
+                    // Calculate proportional height based on hours (out of 8 total, with available space of ~54px)
+                    var blockHeightPercent = (block.hours / 8) * 100;
+                    var blockHeightPx = Math.max((block.hours / 8) * 54, 12); // Minimum 12px height
+                    // Ensure minimum height for visibility and text
+                    var minHeight = Math.max(blockHeightPx, 12);
+                  %>
+                    <div class="project-stack-block draggable-block" 
+                         draggable="true"
+                         data-project-id="<%= block.projectId || '' %>"
+                         data-assignment-id="<%= block.assignmentId || '' %>"
+                         data-emp-code="<%= emp.empCode %>"
+                         data-date="<%= date %>"
+                         data-hours="<%= block.hours %>"
+                         data-project-name="<%= block.projectName %>"
+                         style="width:calc(100% - 4px);height:<%= blockHeightPx %>px;min-height:<%= minHeight %>px;
+                                background: <%= getBlockColor(percentFilled) %>;
+                                border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,0.10);
+                                display:flex;align-items:center;justify-content:space-between;
+                                position:relative;overflow:hidden;transition:all 0.2s;
+                                margin:1px 2px;cursor:grab;flex-shrink:0;
+                                border-bottom: <%= index < blocks.length - 1 ? '1px solid rgba(255,255,255,0.2)' : 'none' %>;"
+                         onclick="event.stopPropagation(); editAssignment(this);"
+                         title="<%= block.projectName %> - <%= block.hours %>h">
+                      <div class="block-content-wrapper" style="display:flex;align-items:center;justify-content:space-between;width:100%;padding:0 8px;">
+                        <span class="block-title" style="color:#212529;text-shadow:none;
+                                                         font-size:<%= block.hours >= 2 ? '0.75em' : '0.65em' %>;
+                                                         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                                                         font-weight:600;max-width:70%;line-height:1.2;">
+                          <%= block.hours >= 1.5 ? block.projectName : (block.projectName.length > 10 ? block.projectName.substring(0, 10) + '...' : block.projectName) %>
+                        </span>
+                        <span class="block-hours" style="font-weight:700;color:#212529;text-shadow:none;
+                                                          font-size:<%= block.hours >= 2 ? '0.75em' : '0.65em' %>;
+                                                          line-height:1.2;margin-left:4px;">
+                          <%= block.hours %>h
+                        </span>
+                      </div>
                     </div>
                   <% }); %>
+                  <% if (totalHours < 8) { 
+                    var remainingHeightPercent = ((8 - totalHours) / 8) * 100;
+                    var remainingHeightPx = ((8 - totalHours) / 8) * 54;
+                  %>
+                    <div class="remaining-space" 
+                         style="width:calc(100% - 4px);height:<%= remainingHeightPx %>px;min-height:8px;
+                                background:rgba(108, 117, 125, 0.1);
+                                border:2px dashed rgba(108, 117, 125, 0.3);
+                                border-radius:6px;margin:1px 2px;
+                                display:flex;align-items:center;justify-content:center;
+                                font-size:0.65em;color:#6c757d;font-weight:500;
+                                flex-shrink:0;">
+                      <span style="text-align:center;line-height:1.2;">
+                        <% if (remainingHeightPx >= 20) { %>
+                          <i class="fas fa-plus-circle" style="display:block;margin-bottom:2px;font-size:1.1em;"></i>
+                        <% } %>
+                        <%= (8 - totalHours) %>h
+                      </span>
+                    </div>
+                  <% } %>
                 <% } else { %>
-                  <div class="block-content" style="position:relative;z-index:2;color:#888;padding:2px 6px;font-size:0.95em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                    <span class="block-title">-</span>
+                  <div class="block-content empty-slot" style="position:relative;z-index:2;color:#888;
+                                                              padding:8px;font-size:0.85em;text-align:center;
+                                                              width:100%;height:100%;display:flex;
+                                                              flex-direction:column;align-items:center;
+                                                              justify-content:center;">
+                    <i class="fas fa-plus-circle" style="font-size:1.5em;color:#ccc;margin-bottom:4px;"></i>
+                    <span class="block-title">Click to assign</span>
                   </div>
                 <% } %>
               </div>
@@ -124,22 +308,22 @@
   font-weight: 500;
   font-size: 0.97em;
   letter-spacing: 0.01em;
-  color: #fff;
-  text-shadow: 0 1px 4px #000a, 0 0 2px #000a;
+  color: #212529 !important;
+  text-shadow: none !important;
 }
 .block-title {
   font-weight: 500;
   font-size: 0.97em;
   letter-spacing: 0.01em;
-  color: #fff;
-  text-shadow: 0 1px 4px #000a, 0 0 2px #000a;
+  color: #212529 !important;
+  text-shadow: none !important;
 }
 .block-hours {
   font-size: 0.97em;
   margin-left: 8px;
-  color: #fff;
+  color: #212529 !important;
   font-weight: 700;
-  text-shadow: 0 1px 4px #000a, 0 0 2px #000a;
+  text-shadow: none !important;
 }
 .hours-block.empty {
   background: #f8d7da;
@@ -161,6 +345,335 @@
   z-index: 2;
   position: relative;
 }
+
+/* Drag and Drop Styles */
+.draggable-block {
+  cursor: grab !important;
+  transition: all 0.2s ease;
+}
+
+.draggable-block:active {
+  cursor: grabbing !important;
+}
+
+.draggable-block.dragging {
+  opacity: 0.5;
+  transform: rotate(5deg);
+  z-index: 1000;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+}
+
+.drop-zone {
+  transition: all 0.2s ease;
+}
+
+.drop-zone.drag-over {
+  background-color: #e3f2fd !important;
+  border: 2px dashed #2196f3 !important;
+  transform: scale(1.02);
+}
+
+.drop-zone.drag-over .fixed-block {
+  background-color: #e3f2fd !important;
+}
+
+.drop-zone.drag-over-invalid {
+  background-color: #ffebee !important;
+  border: 2px dashed #f44336 !important;
+  transform: scale(1.02);
+}
+
+.drop-zone.drag-over-invalid .fixed-block {
+  background-color: #ffebee !important;
+}
+
+.drop-zone.drag-over-invalid::after {
+  content: '⚠️ EXCEEDS 8H LIMIT';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(244, 67, 54, 0.9);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.7em;
+  font-weight: bold;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+.empty-slot {
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+.drop-zone.drag-over .empty-slot {
+  opacity: 1;
+  color: #2196f3 !important;
+}
+
+/* Additional enhancements */
+.draggable-block[draggable="false"] {
+  opacity: 1;
+}
+
+.draggable-block[draggable="true"]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+.project-stack-block {
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.project-stack-block:hover {
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+  z-index: 5;
+}
+
+/* Enhanced visual feedback for proportional heights */
+.project-stack-block .block-content-wrapper {
+  transition: all 0.2s ease;
+}
+
+.project-stack-block:hover .block-content-wrapper {
+  transform: scale(1.02);
+}
+
+/* Visual depth for stacked blocks */
+.project-stack-block:nth-child(1) { z-index: 4; }
+.project-stack-block:nth-child(2) { z-index: 3; }
+.project-stack-block:nth-child(3) { z-index: 2; }
+.project-stack-block:nth-child(4) { z-index: 1; }
+
+/* Subtle gradient for depth */
+.project-stack-block::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(to bottom, 
+    rgba(255,255,255,0.1) 0%, 
+    rgba(255,255,255,0.05) 50%, 
+    rgba(0,0,0,0.1) 100%);
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* Remaining space styling */
+.remaining-space {
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.remaining-space:hover {
+  background: rgba(108, 117, 125, 0.2) !important;
+  border-color: rgba(108, 117, 125, 0.5) !important;
+}
+
+.remaining-space::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80%;
+  height: 2px;
+  background: rgba(108, 117, 125, 0.3);
+  border-radius: 1px;
+}
+
+/* Better responsive text sizing for different block heights */
+.project-stack-block[style*="height: 54px"] .block-title,
+.project-stack-block[style*="height: 48px"] .block-title,
+.project-stack-block[style*="height: 42px"] .block-title {
+  font-size: 0.8em !important;
+}
+
+.project-stack-block[style*="height: 36px"] .block-title,
+.project-stack-block[style*="height: 30px"] .block-title {
+  font-size: 0.75em !important;
+}
+
+.project-stack-block[style*="height: 24px"] .block-title,
+.project-stack-block[style*="height: 18px"] .block-title,
+.project-stack-block[style*="height: 12px"] .block-title {
+  font-size: 0.65em !important;
+}
+
+.project-stack-block::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(45deg, transparent 40%, rgba(255,255,255,0.1) 50%, transparent 60%);
+  transform: translateX(-100%);
+  transition: transform 0.6s;
+}
+
+.project-stack-block:hover::before {
+  transform: translateX(100%);
+}
+
+.calendar-cell.no-task {
+  border: 2px dashed #ddd;
+  background: #f9f9f9;
+}
+
+.calendar-cell.no-task .empty-slot {
+  font-style: italic;
+  color: #999;
+}
+
+.toast-container .alert {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  border: none;
+}
+
+#loading-overlay {
+  backdrop-filter: blur(2px);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .calendar-cell {
+    min-width: 80px !important;
+  }
+  
+  .project-stack-block {
+    font-size: 0.9em;
+  }
+  
+  .block-title, .block-hours {
+    font-size: 0.9em !important;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
+
+/* Drag Fill Styles */
+.drag-fill-mode .calendar-cell {
+  cursor: crosshair !important;
+}
+
+.drag-fill-selection {
+  background: rgba(33, 150, 243, 0.2) !important;
+  border: 2px solid #2196f3 !important;
+  position: relative;
+}
+
+.drag-fill-selection::after {
+  content: '⭐ SOURCE';
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2196f3;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.7em;
+  font-weight: bold;
+  z-index: 10;
+}
+
+.drag-fill-preview {
+  background: rgba(76, 175, 80, 0.3) !important;
+  border: 2px dashed #4caf50 !important;
+  position: relative;
+  animation: dragFillPulse 1s ease-in-out infinite alternate;
+}
+
+.drag-fill-preview::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(76, 175, 80, 0.8);
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 0.9em;
+  z-index: 5;
+}
+
+@keyframes dragFillPulse {
+  from {
+    border-color: #4caf50;
+    background: rgba(76, 175, 80, 0.3);
+  }
+  to {
+    border-color: #66bb6a;
+    background: rgba(76, 175, 80, 0.4);
+  }
+}
+
+/* Row drag-fill styles */
+.drag-fill-preview-row {
+  background: rgba(255, 193, 7, 0.2) !important;
+  border: 2px dashed #ffc107 !important;
+  position: relative;
+}
+
+.drag-fill-preview-row::after {
+  content: '📋 ROW';
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  transform: translateY(-50%);
+  background: rgba(255, 193, 7, 0.9);
+  color: #212529;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 0.7em;
+  font-weight: bold;
+  z-index: 5;
+}
+
+/* Source project highlight styles */
+.drag-fill-source-project {
+  background: rgba(220, 53, 69, 0.3) !important;
+  border: 2px solid #dc3545 !important;
+  position: relative;
+  box-shadow: 0 0 10px rgba(220, 53, 69, 0.5);
+}
+
+.drag-fill-source-project::after {
+  content: '🎯 PROJECT';
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #dc3545;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.7em;
+  font-weight: bold;
+  z-index: 10;
+}
+
+/* Source row highlight styles */
+.drag-fill-source-row {
+  background: rgba(255, 193, 7, 0.3) !important;
+  border: 2px solid #ffc107 !important;
+  position: relative;
+  box-shadow: 0 0 5px rgba(255, 193, 7, 0.5);
+}
 </style>
 
 <!-- <style>
@@ -179,6 +692,1039 @@
 // Enable Bootstrap tooltips
 $(function () {
   $('[data-toggle="tooltip"]').tooltip({ container: 'body' });
+});
+
+// Global variables
+let draggedElement = null;
+let draggedData = null;
+let isDragModeEnabled = false;
+let isDragFillEnabled = false;
+let dragFillStart = null;
+let dragFillSelection = [];
+let availableProjects = [];
+
+$(document).ready(function() {
+  // Load available projects
+  loadProjects();
+  
+  // Cell click handler for assignment
+  $(document).on('click', '.clickable-cell', function(e) {
+    if (isDragModeEnabled || isDragFillEnabled) return;
+    
+    const empCode = $(this).data('emp-code');
+    const empName = $(this).data('emp-name');
+    const date = $(this).data('date');
+    const totalHours = parseFloat($(this).data('total-hours')) || 0;
+    
+    openAssignmentModal(empCode, empName, date, totalHours);
+  });
+
+  // Save assignment
+  $('#saveAssignment').click(function() {
+    saveAssignment();
+  });
+
+  // Update assignment
+  $('#updateAssignment').click(function() {
+    updateAssignmentModal();
+  });
+
+  // Delete assignment
+  $('#deleteAssignment').click(function() {
+    deleteAssignmentModal();
+  });
+
+  // Toggle drag mode
+  $('#toggleDragMode').click(function() {
+    isDragModeEnabled = !isDragModeEnabled;
+    if (isDragModeEnabled) {
+      isDragFillEnabled = false;
+      $('#toggleDragFill').html('<i class="fas fa-fill"></i> Enable Drag Fill').removeClass('btn-warning').addClass('btn-success');
+      $('body').removeClass('drag-fill-mode');
+      
+      $(this).html('<i class="fas fa-lock"></i> Disable Drag Mode').removeClass('btn-info').addClass('btn-warning');
+      $('.draggable-block').attr('draggable', 'true').css('cursor', 'grab');
+      showToast('Drag mode enabled! You can now drag tasks between employees and dates.', 'success');
+    } else {
+      $(this).html('<i class="fas fa-arrows-alt"></i> Enable Drag Mode').removeClass('btn-warning').addClass('btn-info');
+      $('.draggable-block').attr('draggable', 'false').css('cursor', 'default');
+      showToast('Drag mode disabled.', 'info');
+    }
+  });
+
+  // Toggle drag fill mode
+  $('#toggleDragFill').click(function() {
+    isDragFillEnabled = !isDragFillEnabled;
+    if (isDragFillEnabled) {
+      isDragModeEnabled = false;
+      $('#toggleDragMode').html('<i class="fas fa-arrows-alt"></i> Enable Drag Mode').removeClass('btn-warning').addClass('btn-info');
+      $('.draggable-block').attr('draggable', 'false').css('cursor', 'default');
+      
+      $(this).html('<i class="fas fa-stop-circle"></i> Disable Drag Fill').removeClass('btn-success').addClass('btn-warning');
+      $('body').addClass('drag-fill-mode');
+      showToast('Drag-fill mode enabled! Click and drag to fill multiple cells with hours.', 'success');
+    } else {
+      $(this).html('<i class="fas fa-fill"></i> Enable Drag Fill').removeClass('btn-warning').addClass('btn-success');
+      $('body').removeClass('drag-fill-mode');
+      clearDragFillSelection();
+      showToast('Drag-fill mode disabled.', 'info');
+    }
+  });
+
+  // Drag Fill functionality
+  let isMouseDown = false;
+  let dragFillMode = 'cell'; // 'cell', 'project', 'row'
+  
+  // Enhanced drag-fill: Click on project block to drag-fill that specific project
+  $(document).on('mousedown', '.project-stack-block', function(e) {
+    if (!isDragFillEnabled) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    isMouseDown = true;
+    dragFillMode = 'project';
+    
+    const projectBlock = $(this);
+    const cell = projectBlock.closest('.calendar-cell');
+    
+    dragFillStart = {
+      empCode: cell.data('emp-code'),
+      date: cell.data('date'),
+      element: cell[0],
+      projectData: {
+        projectId: projectBlock.data('project-id'),
+        projectName: projectBlock.data('project-name'),
+        hours: projectBlock.data('hours')
+      }
+    };
+    
+    // Highlight the selected project
+    projectBlock.addClass('drag-fill-source-project');
+    showToast(`Drag-fill: "${dragFillStart.projectData.projectName}" selected`, 'info');
+    
+    clearDragFillSelection();
+    cell.addClass('drag-fill-selection');
+    dragFillSelection = [cell[0]];
+  });
+  
+  // Cell-level drag-fill (drag all projects in cell)
+  $(document).on('mousedown', '.calendar-cell', function(e) {
+    if (!isDragFillEnabled || $(e.target).hasClass('project-stack-block')) return;
+    
+    e.preventDefault();
+    isMouseDown = true;
+    dragFillMode = 'cell';
+    
+    dragFillStart = {
+      empCode: $(this).data('emp-code'),
+      date: $(this).data('date'),
+      element: this
+    };
+    
+    // Find all project blocks in this cell
+    const projectBlocks = $(this).find('.draggable-block');
+    if (projectBlocks.length > 0) {
+      if (projectBlocks.length === 1) {
+        // Only one project, use it directly
+        const projectBlock = projectBlocks.first();
+        dragFillStart.projectData = {
+          projectId: projectBlock.data('project-id'),
+          projectName: projectBlock.data('project-name'),
+          hours: projectBlock.data('hours')
+        };
+        showToast(`Drag-fill: "${dragFillStart.projectData.projectName}" selected`, 'info');
+      } else {
+        // Multiple projects - will copy all
+        dragFillStart.allProjects = [];
+        projectBlocks.each(function() {
+          const block = $(this);
+          dragFillStart.allProjects.push({
+            projectId: block.data('project-id'),
+            projectName: block.data('project-name'),
+            hours: block.data('hours')
+          });
+        });
+        showToast(`Drag-fill: ${projectBlocks.length} projects selected`, 'info');
+      }
+    } else {
+      // No projects in source cell
+      showToast('No projects in this cell. Please select a cell with existing assignments.', 'warning');
+      isMouseDown = false;
+      return;
+    }
+    
+    clearDragFillSelection();
+    $(this).addClass('drag-fill-selection');
+    dragFillSelection = [this];
+  });
+
+  // Row-level drag-fill (drag entire row)
+  $(document).on('mousedown', '.emp-cell', function(e) {
+    if (!isDragFillEnabled) return;
+    
+    e.preventDefault();
+    isMouseDown = true;
+    dragFillMode = 'row';
+    
+    const row = $(this).closest('tr');
+    const empCode = row.find('.calendar-cell').first().data('emp-code');
+    
+    dragFillStart = {
+      empCode: empCode,
+      mode: 'row',
+      element: this,
+      sourceRow: row
+    };
+    
+    // Collect all projects from all cells in this row
+    const allRowProjects = [];
+    row.find('.calendar-cell').each(function() {
+      const cell = $(this);
+      const date = cell.data('date');
+      const projects = [];
+      
+      cell.find('.draggable-block').each(function() {
+        const block = $(this);
+        projects.push({
+          projectId: block.data('project-id'),
+          projectName: block.data('project-name'),
+          hours: block.data('hours'),
+          date: date
+        });
+      });
+      
+      if (projects.length > 0) {
+        allRowProjects.push({
+          date: date,
+          projects: projects
+        });
+      }
+    });
+    
+    if (allRowProjects.length === 0) {
+      showToast('No projects found in this row.', 'warning');
+      isMouseDown = false;
+      return;
+    }
+    
+    dragFillStart.rowProjects = allRowProjects;
+    showToast(`Row drag-fill: ${allRowProjects.length} dates with projects selected`, 'info');
+    
+    clearDragFillSelection();
+    row.addClass('drag-fill-source-row');
+    dragFillSelection = [this];
+  });
+
+  $(document).on('mouseenter', '.calendar-cell', function(e) {
+    if (!isDragFillEnabled || !isMouseDown || !dragFillStart) return;
+    
+    // Handle row drag-fill mode
+    if (dragFillMode === 'row') {
+      const targetRow = $(this).closest('tr');
+      const targetEmpCode = $(this).data('emp-code');
+      
+      if (targetEmpCode !== dragFillStart.empCode) {
+        // Clear previous preview
+        $('.drag-fill-preview, .drag-fill-preview-row').removeClass('drag-fill-preview drag-fill-preview-row');
+        
+        // Highlight entire target row
+        targetRow.addClass('drag-fill-preview-row');
+        
+        // Add all cells in target row to selection
+        clearDragFillSelection();
+        $('.drag-fill-source-row').addClass('drag-fill-selection');
+        targetRow.find('.calendar-cell').each(function() {
+          if (!dragFillSelection.includes(this)) {
+            dragFillSelection.push(this);
+          }
+        });
+      }
+      return;
+    }
+    
+    // Handle cell and project drag-fill modes
+    // Clear previous preview
+    $('.drag-fill-preview').removeClass('drag-fill-preview');
+    
+    // Add to selection if not already included
+    if (!$(this).hasClass('drag-fill-selection')) {
+      $(this).addClass('drag-fill-preview');
+      
+      // Update selection array based on drag mode
+      if (dragFillMode === 'project' || dragFillMode === 'cell') {
+        const startRow = $(dragFillStart.element).closest('tr').index();
+        const currentRow = $(this).closest('tr').index();
+        const startCol = $(dragFillStart.element).index();
+        const currentCol = $(this).index();
+        
+        // Calculate rectangular selection
+        const minRow = Math.min(startRow, currentRow);
+        const maxRow = Math.max(startRow, currentRow);
+        const minCol = Math.min(startCol, currentCol);
+        const maxCol = Math.max(startCol, currentCol);
+        
+        // Clear and rebuild selection
+        clearDragFillSelection();
+        $(dragFillStart.element).addClass('drag-fill-selection');
+        
+        let cellCount = 0;
+        for (let row = minRow; row <= maxRow; row++) {
+          for (let col = minCol; col <= maxCol; col++) {
+            const cell = $('tbody tr').eq(row).find('td').eq(col);
+            if (cell.hasClass('calendar-cell')) {
+              cell.addClass('drag-fill-preview');
+              if (!dragFillSelection.includes(cell[0])) {
+                dragFillSelection.push(cell[0]);
+              }
+              cellCount++;
+            }
+          }
+        }
+        
+        // Update UI to show selection count
+        if (dragFillStart.projectData && cellCount > 1) {
+          const tooltip = `Drag-filling "${dragFillStart.projectData.projectName}" to ${cellCount} cells`;
+          $(this).attr('title', tooltip);
+        } else if (dragFillStart.allProjects && cellCount > 1) {
+          const tooltip = `Drag-filling ${dragFillStart.allProjects.length} projects to ${cellCount} cells`;
+          $(this).attr('title', tooltip);
+        }
+      }
+    }
+  });
+
+  $(document).on('mouseup', function(e) {
+    if (!isDragFillEnabled || !isMouseDown || !dragFillStart) return;
+    
+    isMouseDown = false;
+    
+    if (dragFillMode === 'row') {
+      // Handle row drag-fill
+      if (dragFillSelection.length > 1 && dragFillStart.rowProjects) {
+        const targetRows = $('.drag-fill-preview-row');
+        if (targetRows.length > 0) {
+          const confirmMessage = `Copy all projects from ${dragFillStart.empCode} to ${targetRows.length} employee(s)?`;
+          if (confirm(confirmMessage)) {
+            performRowDragFill(dragFillStart, targetRows);
+          }
+        }
+      }
+    } else if (dragFillSelection.length > 1) {
+      // Handle cell/project drag-fill
+      if (dragFillStart.projectData) {
+        // Single project drag-fill
+        const defaultHours = dragFillStart.projectData.hours;
+        const projectName = dragFillStart.projectData.projectName;
+        const hoursInput = prompt(`Fill ${dragFillSelection.length} cells with "${projectName}".\n\nEnter hours per cell (default: ${defaultHours}):`, defaultHours);
+        
+        if (hoursInput && !isNaN(hoursInput) && parseFloat(hoursInput) > 0 && parseFloat(hoursInput) <= 8) {
+          const hours = parseFloat(hoursInput);
+          performDragFill(dragFillStart, dragFillSelection, hours);
+        } else if (hoursInput !== null) {
+          showToast('Invalid hours entered. Please enter a value between 0.5 and 8.', 'error');
+        }
+      } else if (dragFillStart.allProjects) {
+        // Multiple projects drag-fill
+        const confirmMessage = `Copy ${dragFillStart.allProjects.length} projects to ${dragFillSelection.length} cells with original hours?`;
+        if (confirm(confirmMessage)) {
+          performMultiProjectDragFill(dragFillStart, dragFillSelection);
+        }
+      }
+    } else if (dragFillSelection.length > 1 && !dragFillStart.projectData && !dragFillStart.allProjects) {
+      showToast('No project found in source cell. Please start drag-fill from a cell with existing assignments.', 'warning');
+    }
+    
+    clearDragFillSelection();
+    $('.drag-fill-source-project').removeClass('drag-fill-source-project');
+    $('.drag-fill-source-row').removeClass('drag-fill-source-row');
+    $('.drag-fill-preview-row').removeClass('drag-fill-preview-row');
+    dragFillStart = null;
+    dragFillMode = 'cell';
+  });
+
+  // Regular drag and drop for individual blocks
+  $(document).on('dragstart', '.draggable-block', function(e) {
+    if (!isDragModeEnabled) {
+      e.preventDefault();
+      return false;
+    }
+    
+    draggedElement = this;
+    draggedData = {
+      projectId: $(this).data('project-id'),
+      assignmentId: $(this).data('assignment-id'),
+      empCode: $(this).data('emp-code'),
+      date: $(this).data('date'),
+      hours: $(this).data('hours'),
+      projectName: $(this).data('project-name')
+    };
+    
+    $(this).addClass('dragging');
+    
+    // Set drag effect
+    e.originalEvent.dataTransfer.effectAllowed = 'move';
+    e.originalEvent.dataTransfer.setData('text/html', '');
+  });
+
+  $(document).on('dragend', '.draggable-block', function(e) {
+    $(this).removeClass('dragging');
+    $('.drop-zone').removeClass('drag-over drag-over-invalid');
+  });
+
+  // Make calendar cells drop zones
+  $('.drop-zone').on('dragover', function(e) {
+    if (!isDragModeEnabled) return;
+    e.preventDefault();
+    
+    // Check if dropping here would exceed 8-hour limit
+    if (draggedData) {
+      const targetTotalHours = parseFloat($(this).data('total-hours')) || 0;
+      const draggedHours = parseFloat(draggedData.hours) || 0;
+      const newTotalHours = targetTotalHours + draggedHours;
+      
+      if (newTotalHours > 8) {
+        e.originalEvent.dataTransfer.dropEffect = 'none';
+        $(this).addClass('drag-over-invalid');
+        $(this).removeClass('drag-over');
+        return;
+      } else {
+        e.originalEvent.dataTransfer.dropEffect = 'move';
+        $(this).addClass('drag-over');
+        $(this).removeClass('drag-over-invalid');
+      }
+    } else {
+      e.originalEvent.dataTransfer.dropEffect = 'move';
+      $(this).addClass('drag-over');
+    }
+  });
+
+  $('.drop-zone').on('dragleave', function(e) {
+    if (!isDragModeEnabled) return;
+    // Only remove highlight if we're actually leaving the drop zone
+    if (!$.contains(this, e.relatedTarget)) {
+      $(this).removeClass('drag-over drag-over-invalid');
+    }
+  });
+
+  $('.drop-zone').on('drop', function(e) {
+    if (!isDragModeEnabled) return;
+    e.preventDefault();
+    $(this).removeClass('drag-over drag-over-invalid');
+    
+    if (!draggedElement || !draggedData) return;
+    
+    const targetEmpCode = $(this).data('emp-code');
+    const targetDate = $(this).data('date');
+    
+    // Don't allow drop on same cell
+    if (draggedData.empCode === targetEmpCode && draggedData.date === targetDate) {
+      showToast('Cannot move task to the same location!', 'warning');
+      return;
+    }
+    
+    // Check if adding this task would exceed 8 hours for target employee
+    const targetTotalHours = parseFloat($(this).data('total-hours')) || 0;
+    const draggedHours = parseFloat(draggedData.hours) || 0;
+    const newTotalHours = targetTotalHours + draggedHours;
+    
+    if (newTotalHours > 8) {
+      const availableHours = 8 - targetTotalHours;
+      showToast(`Cannot move task! This would exceed the 8-hour daily limit for ${targetEmpCode} on ${targetDate}. Available hours: ${availableHours}`, 'error');
+      return;
+    }
+    
+    // Show confirmation dialog
+    const confirmMessage = `Move "${draggedData.projectName}" (${draggedData.hours}h) from ${draggedData.empCode} (${draggedData.date}) to ${targetEmpCode} (${targetDate})?`;
+    
+    if (confirm(confirmMessage)) {
+      // Call server endpoint to update assignment
+      updateAssignment(draggedData, targetEmpCode, targetDate);
+    }
+  });
+
+  // Initially disable both modes
+  $('.draggable-block').attr('draggable', 'false').css('cursor', 'default');
+  
+  // Add real-time validation for hours input in edit modal
+  $('#editHoursInput').on('input', function() {
+    const hours = parseFloat($(this).val()) || 0;
+    const empCode = $('#editEmpCode').val();
+    const date = $('#editDate').val();
+    const currentCell = $(`.calendar-cell[data-emp-code="${empCode}"][data-date="${date}"]`);
+    const cellTotalHours = parseFloat(currentCell.data('total-hours')) || 0;
+    const currentAssignmentHours = parseFloat($(this).attr('data-original-hours')) || 0;
+    const remainingHours = 8 - cellTotalHours + currentAssignmentHours;
+    
+    const remainingDisplay = $('#editRemainingHours');
+    if (hours > remainingHours) {
+      remainingDisplay.html(`<span class="text-danger">Exceeds available hours! Only ${remainingHours} hours available.</span>`);
+      $('#updateAssignment').prop('disabled', true);
+    } else if (hours <= 0) {
+      remainingDisplay.html(`<span class="text-warning">Hours must be greater than 0</span>`);
+      $('#updateAssignment').prop('disabled', true);
+    } else {
+      remainingDisplay.html(`<span class="text-success">Valid. ${remainingHours - hours} hours will remain available.</span>`);
+      $('#updateAssignment').prop('disabled', false);
+    }
+  });
+});
+
+// Load available projects from server
+function loadProjects() {
+  $.get('/api/projects', function(data) {
+    availableProjects = data;
+    const projectSelect = $('#projectSelect');
+    projectSelect.empty().append('<option value="">Select a project...</option>');
+    
+    data.forEach(function(project) {
+      // Compose a detailed briefing for each project using ProjectMaster schema fields
+      const briefing = `${project.projectName} | Manager: ${project.projectManager || ''} | CBSL: ${project.cbslClient || ''} | DIH: ${project.dihClient || ''}`;
+      projectSelect.append(`<option value="${project._id}">${briefing}</option>`);
+    });
+  }).fail(function() {
+    showToast('Failed to load projects', 'error');
+  });
+}
+
+// Open assignment modal
+function openAssignmentModal(empCode, empName, date, totalHours) {
+  $('#modalEmpCode').val(empCode);
+  $('#modalEmployeeName').val(empName);
+  $('#modalDate').val(date);
+  $('#modalDateDisplay').val(date);
+  
+  // Calculate remaining hours
+  const remainingHours = 8 - totalHours;
+  $('#remainingHours').text(`Remaining hours: ${remainingHours}`);
+  $('#hoursInput').attr('max', remainingHours).val('');
+  
+  // Load current assignments for this employee and date
+  loadCurrentAssignments(empCode, date);
+  
+  // Reset form
+  $('#projectSelect').val('');
+  $('#hoursInput').val('');
+  
+  $('#assignmentModal').modal('show');
+}
+
+// Load current assignments for display
+function loadCurrentAssignments(empCode, date) {
+  $.get(`/api/assignments/${empCode}/${date}`, function(assignments) {
+    const assignmentsList = $('#assignmentsList');
+    const existingDiv = $('#existingAssignments');
+    
+    if (assignments.length > 0) {
+      assignmentsList.empty();
+      assignments.forEach(function(assignment) {
+        assignmentsList.append(`
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span><strong>${assignment.projectName}</strong></span>
+            <span class="badge bg-primary">${assignment.hours}h</span>
+          </div>
+        `);
+      });
+      existingDiv.show();
+    } else {
+      existingDiv.hide();
+    }
+  });
+}
+
+// Save new assignment
+function saveAssignment() {
+  const empCode = $('#modalEmpCode').val();
+  const date = $('#modalDate').val();
+  const projectId = $('#projectSelect').val();
+  const hours = parseFloat($('#hoursInput').val());
+  
+  if (!projectId || !hours) {
+    showToast('Please select a project and enter hours', 'error');
+    return;
+  }
+  
+  if (hours <= 0 || hours > 8) {
+    showToast('Hours must be between 0.5 and 8', 'error');
+    return;
+  }
+  
+  showLoading(true);
+  
+  $.ajax({
+    url: '/api/assignments',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      empCode: empCode,
+      date: date,
+      projectId: projectId,
+      hours: hours
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || 'Assignment created successfully!', 'success');
+        $('#assignmentModal').modal('hide');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error creating assignment:', error);
+      showToast('Error creating assignment. Please try again.', 'error');
+    }
+  });
+}
+
+// Edit assignment function
+function editAssignment(element) {
+  const projectId = $(element).data('project-id');
+  const assignmentId = $(element).data('assignment-id');
+  const empCode = $(element).data('emp-code');
+  const date = $(element).data('date');
+  const hours = $(element).data('hours');
+  const projectName = $(element).data('project-name');
+  
+  // Find employee name
+  const empName = $(element).closest('tr').find('.emp-name').text();
+  
+  // Populate edit modal
+  $('#editEmpCode').val(empCode);
+  $('#editEmployeeName').val(empName);
+  $('#editDate').val(date);
+  $('#editDateDisplay').val(date);
+  $('#editAssignmentId').val(assignmentId);
+  $('#editProjectId').val(projectId);
+  $('#editProjectName').val(projectName);
+  $('#editHoursInput').val(hours);
+  $('#editHoursInput').attr('data-original-hours', hours);
+  
+  // Calculate remaining hours (excluding current assignment)
+  const cellTotalHours = parseFloat($(element).closest('.calendar-cell').data('total-hours')) || 0;
+  const currentAssignmentHours = parseFloat(hours) || 0;
+  const remainingHours = 8 - cellTotalHours + currentAssignmentHours;
+  $('#editRemainingHours').text(`Remaining hours: ${remainingHours}`);
+  // Set max to 8 for editing (the validation will handle the remaining hours check)
+  $('#editHoursInput').attr('max', 8);
+  
+  // Reset the update button state
+  $('#updateAssignment').prop('disabled', false);
+  
+  $('#editModal').modal('show');
+}
+
+// Update assignment
+function updateAssignmentModal() {
+  const assignmentId = $('#editAssignmentId').val();
+  const hours = parseFloat($('#editHoursInput').val());
+  const empCode = $('#editEmpCode').val();
+  const date = $('#editDate').val();
+  
+  if (!hours || hours <= 0 || hours > 8) {
+    showToast('Hours must be between 0.5 and 8', 'error');
+    return;
+  }
+  
+  // Get current cell data to validate remaining hours
+  const currentCell = $(`.calendar-cell[data-emp-code="${empCode}"][data-date="${date}"]`);
+  const cellTotalHours = parseFloat(currentCell.data('total-hours')) || 0;
+  const currentAssignmentHours = parseFloat($('#editHoursInput').attr('data-original-hours')) || 0;
+  const remainingHours = 8 - cellTotalHours + currentAssignmentHours;
+  
+  if (hours > remainingHours) {
+    showToast(`Cannot assign ${hours} hours. Only ${remainingHours} hours available.`, 'error');
+    return;
+  }
+  
+  showLoading(true);
+  
+  $.ajax({
+    url: `/api/assignments/${assignmentId}`,
+    method: 'PUT',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      hours: hours,
+      date: date // Send date to backend
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || 'Assignment updated successfully!', 'success');
+        $('#editModal').modal('hide');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error updating assignment:', error);
+      showToast('Error updating assignment. Please try again.', 'error');
+    }
+  });
+}
+
+// Delete assignment
+function deleteAssignmentModal() {
+  if (!confirm('Are you sure you want to delete this assignment?')) {
+    return;
+  }
+  
+  const assignmentId = $('#editAssignmentId').val();
+  const empCode = $('#editEmpCode').val();
+  const date = $('#editDate').val();
+  
+  showLoading(true);
+  
+  $.ajax({
+    url: `/api/assignments/${assignmentId}`,
+    method: 'DELETE',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      empCode: empCode,
+      date: date
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || 'Assignment deleted successfully!', 'success');
+        $('#editModal').modal('hide');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error deleting assignment:', error);
+      showToast('Error deleting assignment. Please try again.', 'error');
+    }
+  });
+}
+
+function clearDragFillSelection() {
+  $('.drag-fill-selection, .drag-fill-preview, .drag-fill-preview-row, .drag-fill-source-project, .drag-fill-source-row').removeClass('drag-fill-selection drag-fill-preview drag-fill-preview-row drag-fill-source-project drag-fill-source-row');
+  dragFillSelection = [];
+}
+
+// Single project drag-fill
+function performDragFill(startData, selectedCells, hours) {
+  if (!startData.projectData) {
+    showToast('No source project found for drag-fill operation', 'error');
+    return;
+  }
+  
+  // Validate 8-hour limit for each target cell
+  const invalidCells = [];
+  const targetCells = selectedCells.map(cell => {
+    const $cell = $(cell);
+    const empCode = $cell.data('emp-code');
+    const date = $cell.data('date');
+    const currentTotalHours = parseFloat($cell.data('total-hours')) || 0;
+    
+    // Skip source cell
+    if (empCode === startData.empCode && date === startData.date) {
+      return null;
+    }
+    
+    // Check if adding hours would exceed 8-hour limit
+    if (currentTotalHours + hours > 8) {
+      const availableHours = 8 - currentTotalHours;
+      invalidCells.push(`${empCode} (${date}) - Available: ${availableHours}h`);
+      return null;
+    }
+    
+    return { empCode, date };
+  }).filter(cell => cell !== null);
+  
+  if (invalidCells.length > 0) {
+    showToast(`Cannot perform drag-fill! The following cells would exceed 8-hour limit:\n${invalidCells.join('\n')}`, 'error');
+    return;
+  }
+  
+  if (targetCells.length === 0) {
+    showToast('No valid target cells selected', 'warning');
+    return;
+  }
+  
+  showLoading(true);
+  
+  $.ajax({
+    url: '/api/drag-fill',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      sourceEmpCode: startData.empCode,
+      sourceDate: startData.date,
+      projectId: startData.projectData.projectId,
+      targetCells: targetCells,
+      hours: hours,
+      projectName: startData.projectData.projectName
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || `Successfully filled ${targetCells.length} cells with ${hours}h of "${startData.projectData.projectName}"`, 'success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error in drag-fill:', error);
+      showToast('Error performing drag-fill. Please try again.', 'error');
+    }
+  });
+}
+
+// Multiple projects drag-fill
+function performMultiProjectDragFill(startData, selectedCells) {
+  if (!startData.allProjects || startData.allProjects.length === 0) {
+    showToast('No projects found for drag-fill operation', 'error');
+    return;
+  }
+  
+  // Calculate total hours from all projects being copied
+  const totalProjectHours = startData.allProjects.reduce((sum, project) => sum + (parseFloat(project.hours) || 0), 0);
+  
+  // Validate 8-hour limit for each target cell
+  const invalidCells = [];
+  const targetCells = selectedCells.map(cell => {
+    const $cell = $(cell);
+    const empCode = $cell.data('emp-code');
+    const date = $cell.data('date');
+    const currentTotalHours = parseFloat($cell.data('total-hours')) || 0;
+    
+    // Skip source cell
+    if (empCode === startData.empCode && date === startData.date) {
+      return null;
+    }
+    
+    // Check if adding all project hours would exceed 8-hour limit
+    if (currentTotalHours + totalProjectHours > 8) {
+      const availableHours = 8 - currentTotalHours;
+      invalidCells.push(`${empCode} (${date}) - Available: ${availableHours}h, Required: ${totalProjectHours}h`);
+      return null;
+    }
+    
+    return { empCode, date };
+  }).filter(cell => cell !== null);
+  
+  if (invalidCells.length > 0) {
+    showToast(`Cannot perform multi-project drag-fill! The following cells would exceed 8-hour limit:\n${invalidCells.join('\n')}`, 'error');
+    return;
+  }
+  
+  if (targetCells.length === 0) {
+    showToast('No valid target cells selected', 'warning');
+    return;
+  }
+  
+  showLoading(true);
+  
+  $.ajax({
+    url: '/api/multi-project-drag-fill',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      sourceEmpCode: startData.empCode,
+      sourceDate: startData.date,
+      projects: startData.allProjects,
+      targetCells: targetCells
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || `Successfully filled ${targetCells.length} cells with ${startData.allProjects.length} projects`, 'success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error in multi-project drag-fill:', error);
+      showToast('Error performing multi-project drag-fill. Please try again.', 'error');
+    }
+  });
+}
+
+// Row drag-fill
+function performRowDragFill(startData, targetRows) {
+  if (!startData.rowProjects || startData.rowProjects.length === 0) {
+    showToast('No projects found in source row', 'error');
+    return;
+  }
+  
+  // Validate 8-hour limit for each target employee and date combination
+  const invalidCells = [];
+  const targetEmployees = [];
+  
+  targetRows.each(function() {
+    const $row = $(this);
+    const empCode = $row.find('.calendar-cell').first().data('emp-code');
+    
+    if (empCode && empCode !== startData.empCode) {
+      targetEmployees.push(empCode);
+      
+      // Check each date in the source row projects against this target employee
+      startData.rowProjects.forEach(dateProject => {
+        const targetCell = $row.find(`.calendar-cell[data-date="${dateProject.date}"]`);
+        if (targetCell.length > 0) {
+          const currentTotalHours = parseFloat(targetCell.data('total-hours')) || 0;
+          const sourceProjectHours = dateProject.projects.reduce((sum, project) => sum + (parseFloat(project.hours) || 0), 0);
+          
+          if (currentTotalHours + sourceProjectHours > 8) {
+            const availableHours = 8 - currentTotalHours;
+            invalidCells.push(`${empCode} (${dateProject.date}) - Available: ${availableHours}h, Required: ${sourceProjectHours}h`);
+          }
+        }
+      });
+    }
+  });
+  
+  if (invalidCells.length > 0) {
+    showToast(`Cannot perform row drag-fill! The following cells would exceed 8-hour limit:\n${invalidCells.join('\n')}`, 'error');
+    return;
+  }
+  
+  if (targetEmployees.length === 0) {
+    showToast('No valid target employees selected', 'warning');
+    return;
+  }
+  
+  showLoading(true);
+  
+  $.ajax({
+    url: '/api/row-drag-fill',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      sourceEmpCode: startData.empCode,
+      rowProjects: startData.rowProjects,
+      targetEmployees: targetEmployees
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || `Successfully copied row data to ${targetEmployees.length} employees`, 'success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error in row drag-fill:', error);
+      showToast('Error performing row drag-fill. Please try again.', 'error');
+    }
+  });
+}
+
+function updateAssignment(dragData, newEmpCode, newDate) {
+  // Show loading indicator
+  showLoading(true);
+  
+  $.ajax({
+    url: '/api/update-assignment',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      assignmentId: dragData.assignmentId,
+      projectId: dragData.projectId,
+      oldEmpCode: dragData.empCode,
+      oldDate: dragData.date,
+      newEmpCode: newEmpCode,
+      newDate: newDate,
+      hours: dragData.hours,
+      projectName: dragData.projectName
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || 'Assignment updated successfully!', 'success');
+        // Reload the page to show updated assignments after a brief delay
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error updating assignment:', error);
+      showToast('Error updating assignment. Please try again.', 'error');
+    }
+  });
+}
+
+function showToast(message, type) {
+  const toastId = type === 'error' ? 'errorToast' : 'successToast';
+  const messageId = type === 'error' ? 'errorMessage' : 'successMessage';
+  
+  $(`#${messageId}`).text(message);
+  $(`#${toastId}`).fadeIn().delay(3000).fadeOut();
+}
+
+function showLoading(show) {
+  if (show) {
+    $('body').append(`
+      <div id="loading-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;display:flex;justify-content:center;align-items:center;">
+        <div style="background:white;padding:20px;border-radius:8px;text-align:center;">
+          <i class="fas fa-spinner fa-spin fa-2x"></i>
+          <div style="margin-top:10px;">Processing...</div>
+        </div>
+      </div>
+    `);
+  } else {
+    $('#loading-overlay').remove();
+  }
+}
+
+// Add keyboard shortcuts
+$(document).keydown(function(e) {
+  // Escape key to cancel operations
+  if (e.keyCode === 27) {
+    if (draggedElement) {
+      $(draggedElement).removeClass('dragging');
+      $('.drop-zone').removeClass('drag-over');
+      draggedElement = null;
+      draggedData = null;
+    }
+    
+    if (isDragFillEnabled) {
+      clearDragFillSelection();
+      dragFillStart = null;
+    }
+  }
+  
+  // Ctrl+D to toggle drag mode
+  if (e.ctrlKey && e.keyCode === 68) {
+    e.preventDefault();
+    $('#toggleDragMode').click();
+  }
+  
+  // Ctrl+F to toggle drag-fill mode
+  if (e.ctrlKey && e.keyCode === 70) {
+    e.preventDefault();
+    $('#toggleDragFill').click();
+  }
 });
 </script>
 </body>
