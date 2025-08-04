@@ -22,10 +22,10 @@
       <input type="month" id="monthSelect" name="month" value="<%= year %>-<%= month.toString().padStart(2, '0') %>" class="form-control form-control-sm mr-2" style="width: 160px;">
       <button type="submit" class="btn btn-primary btn-sm">Go</button>
     </form>
-    <a href="/assigned-resources" class="btn btn-secondary btn-sm ml-2">Export to Excel</a>
-    <button id="toggleDragMode" class="btn btn-info btn-sm ml-2">
+    <a href="/assigned-resources" class="btn btn-secondary btn-sm ml-2">Back</a>
+    <!-- <button id="toggleDragMode" class="btn btn-info btn-sm ml-2">
       <i class="fas fa-arrows-alt"></i> Enable Drag Mode
-    </button>
+    </button> -->
     <button id="toggleDragFill" class="btn btn-success btn-sm ml-2">
       <i class="fas fa-fill"></i> Enable Drag Fill
     </button>
@@ -84,9 +84,7 @@
                 <!-- Current assignments will be displayed here -->
               </div>
             </div>
-          </form>
-        </div>
-        <div class="modal-footer">
+          <class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" id="saveAssignment" class="btn btn-primary">Save Assignment</button>
         </div>
@@ -674,6 +672,16 @@
   position: relative;
   box-shadow: 0 0 5px rgba(255, 193, 7, 0.5);
 }
+
+/* Hover highlight for project selection */
+.drag-fill-hover-highlight {
+  background: rgba(75, 192, 192, 0.4) !important;
+  border: 2px solid #4bc0c0 !important;
+  position: relative;
+  box-shadow: 0 0 8px rgba(75, 192, 192, 0.6);
+  transform: scale(1.05);
+  z-index: 15;
+}
 </style>
 
 <!-- <style>
@@ -774,6 +782,25 @@ $(document).ready(function() {
   // Drag Fill functionality
   let isMouseDown = false;
   let dragFillMode = 'cell'; // 'cell', 'project', 'row'
+  let hoveredProject = null; // Track which project is being hovered
+  
+  // Track hover over project blocks to auto-select them for drag-fill
+  $(document).on('mouseenter', '.project-stack-block', function(e) {
+    if (!isDragFillEnabled) return;
+    
+    hoveredProject = $(this);
+    // Clear any previous project highlights
+    $('.project-stack-block').removeClass('drag-fill-hover-highlight');
+    // Highlight the hovered project
+    $(this).addClass('drag-fill-hover-highlight');
+  });
+  
+  $(document).on('mouseleave', '.project-stack-block', function(e) {
+    if (!isDragFillEnabled) return;
+    
+    hoveredProject = null;
+    $(this).removeClass('drag-fill-hover-highlight');
+  });
   
   // Enhanced drag-fill: Click on project block to drag-fill that specific project
   $(document).on('mousedown', '.project-stack-block', function(e) {
@@ -807,13 +834,12 @@ $(document).ready(function() {
     dragFillSelection = [cell[0]];
   });
   
-  // Cell-level drag-fill (drag all projects in cell)
+  // Cell-level drag-fill (drag all projects in cell or specific hovered project)
   $(document).on('mousedown', '.calendar-cell', function(e) {
     if (!isDragFillEnabled || $(e.target).hasClass('project-stack-block')) return;
     
     e.preventDefault();
     isMouseDown = true;
-    dragFillMode = 'cell';
     
     dragFillStart = {
       empCode: $(this).data('emp-code'),
@@ -821,36 +847,52 @@ $(document).ready(function() {
       element: this
     };
     
-    // Find all project blocks in this cell
-    const projectBlocks = $(this).find('.draggable-block');
-    if (projectBlocks.length > 0) {
-      if (projectBlocks.length === 1) {
-        // Only one project, use it directly
-        const projectBlock = projectBlocks.first();
-        dragFillStart.projectData = {
-          projectId: projectBlock.data('project-id'),
-          projectName: projectBlock.data('project-name'),
-          hours: projectBlock.data('hours')
-        };
-        showToast(`Drag-fill: "${dragFillStart.projectData.projectName}" selected`, 'info');
-      } else {
-        // Multiple projects - will copy all
-        dragFillStart.allProjects = [];
-        projectBlocks.each(function() {
-          const block = $(this);
-          dragFillStart.allProjects.push({
-            projectId: block.data('project-id'),
-            projectName: block.data('project-name'),
-            hours: block.data('hours')
-          });
-        });
-        showToast(`Drag-fill: ${projectBlocks.length} projects selected`, 'info');
-      }
+    // Check if we were hovering over a specific project
+    if (hoveredProject && hoveredProject.closest('.calendar-cell')[0] === this) {
+      // User was hovering over a specific project - select only that project
+      dragFillMode = 'project';
+      dragFillStart.projectData = {
+        projectId: hoveredProject.data('project-id'),
+        projectName: hoveredProject.data('project-name'),
+        hours: hoveredProject.data('hours')
+      };
+      hoveredProject.addClass('drag-fill-source-project');
+      showToast(`Drag-fill: "${dragFillStart.projectData.projectName}" selected (hover-detected)`, 'info');
     } else {
-      // No projects in source cell
-      showToast('No projects in this cell. Please select a cell with existing assignments.', 'warning');
-      isMouseDown = false;
-      return;
+      // User clicked on cell area - select all projects
+      dragFillMode = 'cell';
+      
+      // Find all project blocks in this cell
+      const projectBlocks = $(this).find('.draggable-block');
+      if (projectBlocks.length > 0) {
+        if (projectBlocks.length === 1) {
+          // Only one project, use it directly
+          const projectBlock = projectBlocks.first();
+          dragFillStart.projectData = {
+            projectId: projectBlock.data('project-id'),
+            projectName: projectBlock.data('project-name'),
+            hours: projectBlock.data('hours')
+          };
+          showToast(`Drag-fill: "${dragFillStart.projectData.projectName}" selected`, 'info');
+        } else {
+          // Multiple projects - will copy all
+          dragFillStart.allProjects = [];
+          projectBlocks.each(function() {
+            const block = $(this);
+            dragFillStart.allProjects.push({
+              projectId: block.data('project-id'),
+              projectName: block.data('project-name'),
+              hours: block.data('hours')
+            });
+          });
+          showToast(`Drag-fill: ${projectBlocks.length} projects selected`, 'info');
+        }
+      } else {
+        // No projects in source cell
+        showToast('No projects in this cell. Please select a cell with existing assignments.', 'warning');
+        isMouseDown = false;
+        return;
+      }
     }
     
     clearDragFillSelection();
@@ -1012,23 +1054,11 @@ $(document).ready(function() {
     } else if (dragFillSelection.length > 1) {
       // Handle cell/project drag-fill
       if (dragFillStart.projectData) {
-        // Single project drag-fill
-        const defaultHours = dragFillStart.projectData.hours;
-        const projectName = dragFillStart.projectData.projectName;
-        const hoursInput = prompt(`Fill ${dragFillSelection.length} cells with "${projectName}".\n\nEnter hours per cell (default: ${defaultHours}):`, defaultHours);
-        
-        if (hoursInput && !isNaN(hoursInput) && parseFloat(hoursInput) > 0 && parseFloat(hoursInput) <= 8) {
-          const hours = parseFloat(hoursInput);
-          performDragFill(dragFillStart, dragFillSelection, hours);
-        } else if (hoursInput !== null) {
-          showToast('Invalid hours entered. Please enter a value between 0.5 and 8.', 'error');
-        }
+        // Single project drag-fill - automatically copy entire source cell content
+        performCellReplaceDragFill(dragFillStart, dragFillSelection);
       } else if (dragFillStart.allProjects) {
-        // Multiple projects drag-fill
-        const confirmMessage = `Copy ${dragFillStart.allProjects.length} projects to ${dragFillSelection.length} cells with original hours?`;
-        if (confirm(confirmMessage)) {
-          performMultiProjectDragFill(dragFillStart, dragFillSelection);
-        }
+        // Multiple projects drag-fill - automatically copy entire source cell content
+        performCellReplaceDragFill(dragFillStart, dragFillSelection);
       }
     } else if (dragFillSelection.length > 1 && !dragFillStart.projectData && !dragFillStart.allProjects) {
       showToast('No project found in source cell. Please start drag-fill from a cell with existing assignments.', 'warning');
@@ -1038,6 +1068,8 @@ $(document).ready(function() {
     $('.drag-fill-source-project').removeClass('drag-fill-source-project');
     $('.drag-fill-source-row').removeClass('drag-fill-source-row');
     $('.drag-fill-preview-row').removeClass('drag-fill-preview-row');
+    $('.drag-fill-hover-highlight').removeClass('drag-fill-hover-highlight');
+    hoveredProject = null;
     dragFillStart = null;
     dragFillMode = 'cell';
   });
@@ -1411,12 +1443,12 @@ function deleteAssignmentModal() {
 }
 
 function clearDragFillSelection() {
-  $('.drag-fill-selection, .drag-fill-preview, .drag-fill-preview-row, .drag-fill-source-project, .drag-fill-source-row').removeClass('drag-fill-selection drag-fill-preview drag-fill-preview-row drag-fill-source-project drag-fill-source-row');
+  $('.drag-fill-selection, .drag-fill-preview, .drag-fill-preview-row, .drag-fill-source-project, .drag-fill-source-row, .drag-fill-hover-highlight').removeClass('drag-fill-selection drag-fill-preview drag-fill-preview-row drag-fill-source-project drag-fill-source-row drag-fill-hover-highlight');
   dragFillSelection = [];
 }
 
 // Single project drag-fill
-function performDragFill(startData, selectedCells, hours) {
+function performDragFill(startData, selectedCells, hours, replaceMode = false) {
   if (!startData.projectData) {
     showToast('No source project found for drag-fill operation', 'error');
     return;
@@ -1435,9 +1467,11 @@ function performDragFill(startData, selectedCells, hours) {
       return null;
     }
     
-    // Check if adding hours would exceed 8-hour limit
-    if (currentTotalHours + hours > 8) {
-      const availableHours = 8 - currentTotalHours;
+    // For replace mode, check if new hours exceed limit
+    // For add mode, check if adding hours would exceed limit
+    const checkHours = replaceMode ? hours : (currentTotalHours + hours);
+    if (checkHours > 8) {
+      const availableHours = replaceMode ? 8 : (8 - currentTotalHours);
       invalidCells.push(`${empCode} (${date}) - Available: ${availableHours}h`);
       return null;
     }
@@ -1467,7 +1501,8 @@ function performDragFill(startData, selectedCells, hours) {
       projectId: startData.projectData.projectId,
       targetCells: targetCells,
       hours: hours,
-      projectName: startData.projectData.projectName
+      projectName: startData.projectData.projectName,
+      replaceMode: replaceMode
     }),
     success: function(response) {
       showLoading(false);
@@ -1632,6 +1667,113 @@ function performRowDragFill(startData, targetRows) {
       showLoading(false);
       console.error('Error in row drag-fill:', error);
       showToast('Error performing row drag-fill. Please try again.', 'error');
+    }
+  });
+}
+
+// Cell replace drag-fill - replaces entire cell content with source cell
+function performCellReplaceDragFill(startData, selectedCells) {
+  if (!startData.empCode || !startData.date) {
+    showToast('No source cell found for drag-fill operation', 'error');
+    return;
+  }
+  
+  // Get projects from drag-fill start data (already collected during selection)
+  let sourceProjects = [];
+  
+  if (startData.projectData) {
+    // Single project was selected/hovered
+    sourceProjects = [startData.projectData];
+  } else if (startData.allProjects) {
+    // Multiple projects were selected (cell click)
+    sourceProjects = startData.allProjects;
+  } else {
+    // Fallback: get all projects from source cell via DOM
+    const sourceCell = $(`.calendar-cell[data-emp-code="${startData.empCode}"][data-date="${startData.date}"]`);
+    sourceCell.find('.draggable-block').each(function() {
+      const block = $(this);
+      sourceProjects.push({
+        projectId: block.data('project-id'),
+        projectName: block.data('project-name'),
+        hours: block.data('hours')
+      });
+    });
+  }
+  
+  if (sourceProjects.length === 0) {
+    showToast('No projects found in source cell', 'error');
+    return;
+  }
+  
+  // Calculate total hours from source projects
+  const totalSourceHours = sourceProjects.reduce((sum, project) => sum + (parseFloat(project.hours) || 0), 0);
+  
+  // Validate 8-hour limit for each target cell
+  const invalidCells = [];
+  const targetCells = selectedCells.map(cell => {
+    const $cell = $(cell);
+    const empCode = $cell.data('emp-code');
+    const date = $cell.data('date');
+    
+    // Skip source cell
+    if (empCode === startData.empCode && date === startData.date) {
+      return null;
+    }
+    
+    // Check if total source hours would exceed 8-hour limit
+    if (totalSourceHours > 8) {
+      invalidCells.push(`${empCode} (${date}) - Source has ${totalSourceHours}h which exceeds limit`);
+      return null;
+    }
+    
+    return { empCode, date };
+  }).filter(cell => cell !== null);
+  
+  if (invalidCells.length > 0) {
+    showToast(`Cannot perform cell replace! The following cells would exceed 8-hour limit:\n${invalidCells.join('\n')}`, 'error');
+    return;
+  }
+  
+  if (targetCells.length === 0) {
+    showToast('No valid target cells selected', 'warning');
+    return;
+  }
+  
+  // Show confirmation dialog with details
+  // const projectNames = sourceProjects.map(p => p.projectName).join(', ');
+  // const confirmMessage = `Replace content in ${targetCells.length} cell(s) with:\n\nProjects: ${projectNames}\nTotal Hours: ${totalSourceHours}h\n\nThis will DELETE all existing assignments in target cells and replace them with the source cell content.\n\nContinue?`;
+  
+  // if (!confirm(confirmMessage)) {
+  //   return;
+  // }
+  
+  showLoading(true);
+  
+  $.ajax({
+    url: '/api/cell-replace-drag-fill',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({
+      sourceEmpCode: startData.empCode,
+      sourceDate: startData.date,
+      sourceProjects: sourceProjects,
+      targetCells: targetCells
+    }),
+    success: function(response) {
+      showLoading(false);
+      if (response.success) {
+        showToast(response.message || `Successfully replaced ${targetCells.length} cells with source cell content`, 'success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast('Error: ' + (response.message || 'Unknown error'), 'error');
+      }
+    },
+    error: function(xhr, status, error) {
+      showLoading(false);
+      console.error('Error in cell replace drag-fill:', error);
+      showToast('Error performing cell replace drag-fill. Please try again.', 'error');
     }
   });
 }

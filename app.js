@@ -106,8 +106,13 @@ function isAuth(req, res, next) {
 }
 
 function isAdmin(req, res, next) {
-  if (req.session.user?.role === 'admin' ||req.session.user?.role === 'manager') return next();
-  res.status(403).send('Access Denied');
+  if (req.session.user?.role === 'admin') return next();
+  res.status(403).render('error', { 
+    message: 'Access denied: Only administrators can access this page.',
+    layout: false,
+    title: 'Access Denied',
+    user: req.session.user
+  });
 }
 
 // Login Routes
@@ -237,7 +242,8 @@ app.get('/dashboard/manager/schedule', isAuth, async (req, res) => {
   try {
     const employees = await Employee.find();
     const projects = await ProjectMaster.find();
-    const practices = await PracticeMaster.find();
+    // Get unique home practices from employees
+    const practices = [...new Set(employees.map(emp => emp.homePractice).filter(Boolean))];
     res.render('manager-schedule', {
       employees,
       projects,
@@ -252,7 +258,7 @@ app.get('/dashboard/manager/schedule', isAuth, async (req, res) => {
     res.status(500).send('Internal Server Error');
   }
 });
-app.post('/assigned-resources/add', async (req, res) => {
+app.post('/assigned-resources/add', isAuth, isAdmin, async (req, res) => {
   try {
     const { employee, project, dailyHours } = req.body;
     // Validation
@@ -298,6 +304,58 @@ app.post('/assigned-resources/add', async (req, res) => {
 });
 
 // Manager: Assigned Resources page
+// Manager: Update assigned schedule (PUT)
+app.put('/dashboard/manager/assigned-resources/:id', isAuth, async (req, res) => {
+  try {
+    const scheduleId = req.params.id;
+    const updateFields = {};
+    // Project name (optional)
+    let projectName = req.body['project[projectName]'] || (req.body.project && req.body.project.projectName);
+    if (projectName) {
+      const projectDoc = await ProjectMaster.findOne({ projectName: projectName });
+      if (projectDoc) {
+        updateFields['project'] = projectDoc._id;
+      }
+    }
+    // Daily hours
+    let dailyHoursObj = {};
+    if (req.body.dailyHours) {
+      Object.keys(req.body.dailyHours).forEach(dateKey => {
+        dailyHoursObj[dateKey] = Number(req.body.dailyHours[dateKey]) || 0;
+      });
+      updateFields['dailyHours'] = dailyHoursObj;
+    }
+    const updated = await AssignedSchedule.findByIdAndUpdate(
+      scheduleId,
+      { $set: updateFields },
+      { new: true }
+    );
+    if (updated) {
+      res.json({ success: true, schedule: updated });
+    } else {
+      res.status(404).json({ success: false, error: 'Schedule not found' });
+    }
+  } catch (err) {
+    console.error('Manager PUT error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Manager: Delete assigned schedule (DELETE)
+app.delete('/dashboard/manager/assigned-resources/:id', isAuth, async (req, res) => {
+  try {
+    const scheduleId = req.params.id;
+    const result = await AssignedSchedule.deleteOne({ _id: scheduleId });
+    if (result.deletedCount > 0) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ success: false, error: 'Schedule not found' });
+    }
+  } catch (err) {
+    console.error('Manager DELETE error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 app.get('/dashboard/manager/assigned-resources', isAuth, async (req, res) => {
   try {
@@ -305,6 +363,11 @@ app.get('/dashboard/manager/assigned-resources', isAuth, async (req, res) => {
     const employeeFilter = req.query.employee || '';
     const projectFilter = req.query.project || '';
     const monthFilter = req.query.month || '';
+
+    // Fetch schedules with populated employee and project data
+    const schedules = await AssignedSchedule.find()
+      .populate('employee')
+      .populate('project');
 
     // Build query for AssignedSchedule
     let scheduleQuery = {};
@@ -367,7 +430,7 @@ app.get('/dashboard/manager/assigned-resources', isAuth, async (req, res) => {
     const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
 
     res.render('manager-assigned-resources', {
-      schedules: uniqueSchedules,
+      schedules: schedules,
       dateRange,
       allYearDates,
       allEmployees,
@@ -989,8 +1052,8 @@ const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbs
   }
 });
 
-// CREATE: Add a new schedule
-app.post('/assigned-resources', async (req, res) => {
+// CREATE: Add a new schedule (Admin only)
+app.post('/assigned-resources', isAuth, isAdmin, async (req, res) => {
   try {
     console.log('POST /assigned-resources', req.body);
     const { empCode, dailyHours, projectAssigned } = req.body;
@@ -1044,8 +1107,8 @@ app.post('/assigned-resources', async (req, res) => {
   }
 });
 
-// READ: Get a schedule by ID (for Edit)
-app.get('/assigned-resources/:id', async (req, res) => {
+// READ: Get a schedule by ID (for Edit) (Admin only)
+app.get('/assigned-resources/:id', isAuth, async (req, res) => {
   try {
     console.log('GET /assigned-resources/:id', req.params.id);
     if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
@@ -1064,8 +1127,8 @@ app.get('/assigned-resources/:id', async (req, res) => {
   }
 });
 
-// UPDATE: Edit a schedule
-app.put('/assigned-resources/:id', async (req, res) => {
+// UPDATE: Edit a schedule (Admin only)
+app.put('/assigned-resources/:id', isAuth, async (req, res) => {
   try {
     //console.log('PUT /assigned-resources/:id', req.params.id);
     //console.log('Request body:', req.body);
@@ -1163,8 +1226,8 @@ app.put('/assigned-resources/:id', async (req, res) => {
   }
 });
 
-// DELETE: Remove a schedule
-app.delete('/assigned-resources/:id', async (req, res) => {
+// DELETE: Remove a schedule (Admin only)
+app.delete('/assigned-resources/:id', isAuth, isAdmin, async (req, res) => {
   try {
     //console.log('DELETE /assigned-resources/:id', req.params.id);
     let result = await AssignedSchedule.deleteOne({ _id: req.params.id });
@@ -1640,7 +1703,8 @@ app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
       allEmployees,
       empDayProjects,
       layout: 'sidebar-layout',
-      title: 'Resource Calendar View'
+      title: 'Resource Calendar View',
+      user: req.session.user
     });
   } catch (err) {
     console.error('Error loading calendar view:', err);
@@ -1652,9 +1716,9 @@ app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
 // (Place this at the end of the file, after all middleware and routes, but before app.listen)
 
 // API endpoint for updating assignments via drag-and-drop
-app.post('/api/update-assignment', isAuth, async (req, res) => {
+app.post('/api/update-assignment', isAuth, isAdmin, async (req, res) => {
   try {
-    console.log('Received assignment update request:', req.body);
+    //console.log('Received assignment update request:', req.body);
     
     const { 
       assignmentId, 
@@ -1740,7 +1804,7 @@ app.post('/api/update-assignment', isAuth, async (req, res) => {
     await sourceSchedule.save();
     await targetSchedule.save();
 
-    console.log('Assignment updated successfully');
+    //console.log('Assignment updated successfully');
     res.json({ 
       success: true, 
       message: `Successfully moved ${hours}h from ${oldEmpCode} to ${newEmpCode}` 
@@ -1758,7 +1822,7 @@ app.post('/api/update-assignment', isAuth, async (req, res) => {
 // API endpoint for drag-fill feature
 app.post('/api/drag-fill', isAuth, async (req, res) => {
   try {
-    console.log('Received drag-fill request:', req.body);
+    //console.log('Received drag-fill request:', req.body);
     
     const { 
       sourceEmpCode, 
@@ -1865,7 +1929,7 @@ app.post('/api/drag-fill', isAuth, async (req, res) => {
       message += `. Failed: ${failedCells.join(', ')}`;
     }
 
-    console.log(`Drag-fill completed: ${updatedCells} cells updated, ${failedCells.length} failed`);
+    //console.log(`Drag-fill completed: ${updatedCells} cells updated, ${failedCells.length} failed`);
     res.json({ 
       success: true, 
       message: message,
@@ -1883,7 +1947,7 @@ app.post('/api/drag-fill', isAuth, async (req, res) => {
 });
 
 // API endpoint for drag-fill calendar updates
-app.post('/api/calendar-drag-fill', async (req, res) => {
+app.post('/api/calendar-drag-fill', isAuth, async (req, res) => {
   try {
     const { updates } = req.body;
     if (!Array.isArray(updates) || updates.length === 0) {
@@ -1923,7 +1987,7 @@ app.post('/api/calendar-drag-fill', async (req, res) => {
 // API endpoint for multi-project drag-fill feature
 app.post('/api/multi-project-drag-fill', isAuth, async (req, res) => {
   try {
-    console.log('Received multi-project drag-fill request:', req.body);
+    //console.log('Received multi-project drag-fill request:', req.body);
     
     const { 
       sourceEmpCode, 
@@ -2021,7 +2085,7 @@ app.post('/api/multi-project-drag-fill', isAuth, async (req, res) => {
       message += `. Failed: ${failedCells.join(', ')}`;
     }
 
-    console.log(`Multi-project drag-fill completed: ${updatedCells} cells updated, ${failedCells.length} failed`);
+    //console.log(`Multi-project drag-fill completed: ${updatedCells} cells updated, ${failedCells.length} failed`);
     res.json({ 
       success: true, 
       message: message,
@@ -2041,7 +2105,7 @@ app.post('/api/multi-project-drag-fill', isAuth, async (req, res) => {
 // API endpoint for row drag-fill feature
 app.post('/api/row-drag-fill', isAuth, async (req, res) => {
   try {
-    console.log('Received row drag-fill request:', req.body);
+    //console.log('Received row drag-fill request:', req.body);
     
     const { 
       sourceEmpCode, 
@@ -2134,7 +2198,7 @@ app.post('/api/row-drag-fill', isAuth, async (req, res) => {
       message += `. Failed: ${failedEmployees.join(', ')}`;
     }
 
-    console.log(`Row drag-fill completed: ${updatedEmployees} employees updated, ${failedEmployees.length} failed`);
+    //console.log(`Row drag-fill completed: ${updatedEmployees} employees updated, ${failedEmployees.length} failed`);
     res.json({ 
       success: true, 
       message: message,
@@ -2144,6 +2208,135 @@ app.post('/api/row-drag-fill', isAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Error in row drag-fill:', error);
+    res.json({ 
+      success: false, 
+      message: `Internal server error: ${error.message}` 
+    });
+  }
+});
+
+// API endpoint for cell replace drag-fill - replaces entire cell content
+app.post('/api/cell-replace-drag-fill', isAuth, async (req, res) => {
+  try {
+    //console.log('Received cell-replace-drag-fill request:', req.body);
+    
+    const { 
+      sourceEmpCode, 
+      sourceDate, 
+      sourceProjects,
+      targetCells
+    } = req.body;
+
+    // Find source employee
+    const sourceEmployee = await Employee.findOne({ empCode: sourceEmpCode });
+    if (!sourceEmployee) {
+      return res.json({ success: false, message: 'Source employee not found' });
+    }
+
+    // Validate source projects
+    if (!sourceProjects || sourceProjects.length === 0) {
+      return res.json({ success: false, message: 'No source projects provided' });
+    }
+
+    // Calculate total hours from source projects
+    const totalSourceHours = sourceProjects.reduce((sum, project) => sum + parseFloat(project.hours || 0), 0);
+    
+    if (totalSourceHours > 8) {
+      return res.json({ success: false, message: `Source projects total ${totalSourceHours}h which exceeds 8-hour limit` });
+    }
+
+    let updatedCells = 0;
+    let failedCells = [];
+
+    // Process each target cell
+    for (const cell of targetCells) {
+      const { empCode, date } = cell;
+      
+      try {
+        // Find target employee
+        const targetEmployee = await Employee.findOne({ empCode });
+        if (!targetEmployee) {
+          failedCells.push(`${empCode} (employee not found)`);
+          continue;
+        }
+
+        // Step 1: Delete all existing assignments for this employee on this date
+        const existingSchedules = await AssignedSchedule.find({ employee: targetEmployee._id });
+        
+        for (const schedule of existingSchedules) {
+          if (schedule.dailyHours && schedule.dailyHours[date]) {
+            // Remove this date from the schedule
+            delete schedule.dailyHours[date];
+            schedule.markModified('dailyHours');
+            
+            // If no dates left in this schedule, delete the entire schedule
+            const remainingDates = Object.keys(schedule.dailyHours);
+            if (remainingDates.length === 0) {
+              await AssignedSchedule.findByIdAndDelete(schedule._id);
+            } else {
+              await schedule.save();
+            }
+          }
+        }
+
+        // Step 2: Create new assignments for each source project
+        for (const sourceProject of sourceProjects) {
+          // Find the project
+          const project = await ProjectMaster.findById(sourceProject.projectId);
+          if (!project) {
+            console.warn(`Project not found: ${sourceProject.projectId}`);
+            continue;
+          }
+
+          // Create or find schedule for this project
+          let targetSchedule = await AssignedSchedule.findOne({
+            employee: targetEmployee._id,
+            project: project._id
+          });
+
+          if (!targetSchedule) {
+            // Create new schedule
+            targetSchedule = new AssignedSchedule({
+              employee: targetEmployee._id,
+              project: project._id,
+              dailyHours: {},
+              scheduledBy: 'Cell Replace Drag-Fill System',
+              scheduledAt: new Date()
+            });
+          }
+
+          // Set hours for the target date
+          if (!targetSchedule.dailyHours) {
+            targetSchedule.dailyHours = {};
+          }
+          
+          targetSchedule.dailyHours[date] = parseFloat(sourceProject.hours);
+          targetSchedule.markModified('dailyHours');
+          await targetSchedule.save();
+        }
+        
+        updatedCells++;
+      } catch (cellError) {
+        console.error(`Error processing cell ${empCode} ${date}:`, cellError);
+        failedCells.push(`${empCode} on ${date} (processing error)`);
+      }
+    }
+
+    let message = `Successfully replaced ${updatedCells} cells with source cell content (${sourceProjects.length} projects, ${totalSourceHours}h total)`;
+    if (failedCells.length > 0) {
+      message += `. Failed: ${failedCells.join(', ')}`;
+    }
+
+    //console.log(`Cell replace drag-fill completed: ${updatedCells} cells updated, ${failedCells.length} failed`);
+    res.json({ 
+      success: true, 
+      message: message,
+      updatedCells: updatedCells,
+      failedCells: failedCells
+    });
+
+  } catch (error) {
+    console.error('Error in cell-replace-drag-fill:', error);
     res.json({ 
       success: false, 
       message: `Internal server error: ${error.message}` 
@@ -2193,7 +2386,81 @@ app.get('/api/assignments/:empCode/:date', isAuth, async (req, res) => {
   }
 });
 
-// API endpoint to create new assignment
+// API endpoint to check existing assignments for multiple employees across a date range
+app.post('/api/check-assignments', isAuth, async (req, res) => {
+  try {
+    const { empCodes, startDate, endDate } = req.body;
+    
+    if (!empCodes || !Array.isArray(empCodes) || !startDate || !endDate) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    // Find all employees
+    const employees = await Employee.find({ empCode: { $in: empCodes } });
+    const employeeMap = {};
+    employees.forEach(emp => {
+      employeeMap[emp.empCode] = emp._id;
+    });
+
+    // Find all schedules for these employees
+    const employeeIds = employees.map(emp => emp._id);
+    const schedules = await AssignedSchedule.find({ 
+      employee: { $in: employeeIds } 
+    }).populate('project employee');
+
+    // Generate date range with correct format, skipping weekends (same as schedule system)
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const dateRange = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dayOfWeek = d.getDay(); // 0=Sunday, 6=Saturday
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip weekends
+        const day = d.getDate();
+        const monthName = d.toLocaleString('default', { month: 'short' });
+        const dateStr = `${day}-${monthName}`;
+        dateRange.push(dateStr);
+      }
+    }
+
+    // Calculate existing allocations
+    const allocations = {};
+    empCodes.forEach(empCode => {
+      allocations[empCode] = {};
+      dateRange.forEach(date => {
+        allocations[empCode][date] = { totalHours: 0, assignments: [] };
+      });
+    });
+
+    schedules.forEach(schedule => {
+      if (schedule.employee && schedule.dailyHours) {
+        const empCode = schedule.employee.empCode;
+        if (allocations[empCode]) {
+          Object.keys(schedule.dailyHours).forEach(date => {
+            if (allocations[empCode][date]) {
+              const hours = schedule.dailyHours[date] || 0;
+              allocations[empCode][date].totalHours += hours;
+              allocations[empCode][date].assignments.push({
+                projectName: schedule.project ? schedule.project.projectName : 'Unknown',
+                hours: hours
+              });
+            }
+          });
+        }
+      }
+    });
+
+    // Debug logging (remove in production)
+    //console.log('Date range:', dateRange);
+    //console.log('Allocations for first employee:', allocations[empCodes[0]]);
+
+    res.json(allocations);
+  } catch (error) {
+    console.error('Error checking assignments:', error);
+    res.status(500).json({ error: 'Failed to check assignments' });
+  }
+});
+
+// API endpoint to create new assignment (Admin only)
 app.post('/api/assignments', isAuth, async (req, res) => {
   try {
     const { empCode, date, projectId, hours } = req.body;
@@ -2278,7 +2545,7 @@ app.post('/api/assignments', isAuth, async (req, res) => {
   }
 });
 
-// API endpoint to update assignment
+// API endpoint to update assignment (Admin only)
 app.put('/api/assignments/:assignmentId', isAuth, async (req, res) => {
   try {
     const { assignmentId } = req.params;
@@ -2335,7 +2602,7 @@ app.put('/api/assignments/:assignmentId', isAuth, async (req, res) => {
   }
 });
 
-// API endpoint to delete assignment
+// API endpoint to delete assignment (Admin only)
 app.delete('/api/assignments/:assignmentId', isAuth, async (req, res) => {
   try {
     const { assignmentId } = req.params;

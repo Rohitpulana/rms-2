@@ -15,7 +15,15 @@ if (typeof monthFilter !== 'undefined' && monthFilter) {
     month = today.getMonth() + 1;
 }
 const daysInMonth = new Date(year, month, 0).getDate();
-let totalPossibleHours = daysInMonth * 8;
+// Calculate working days in the month (excluding weekends)
+let totalWorkingDays = 0;
+for (let day = 1; day <= daysInMonth; day++) {
+    const currentDate = new Date(year, month - 1, day);
+    if (currentDate.getDay() !== 0 && currentDate.getDay() !== 6) { // 0 = Sunday, 6 = Saturday
+        totalWorkingDays++;
+    }
+}
+let totalPossibleHours = totalWorkingDays * 8;
 
 // Aggregate total hours per employee across all their schedules
 const empAggregates = {};
@@ -48,7 +56,7 @@ schedules.forEach(s => {
         /* Removed table striping except for weekend columns */
         /* Removed table row hover effect */
         .weekend-col { background: #ececec !important; }
-        .low-hours { background: #fff3cd !important; }
+        .resource-name { background: #fff3cd !important; color: black ; padding: 8px; }
         .btn-primary, .btn-success, .btn-info { border-radius: 20px; font-weight: 500; }
         .form-label { font-weight: 500; color: #1976d2; }
         .form-select, .form-control { border-radius: 8px; }
@@ -59,6 +67,7 @@ schedules.forEach(s => {
         #exportExcelBtn:hover { background: linear-gradient(90deg,#1565c0 0,#42a5f5 100%); }
     </style>
 </head>
+
 <body class="bg-light">
 
 <div class="container mt-5">
@@ -143,7 +152,7 @@ schedules.forEach(s => {
                 %>
                 <tr id="row-<%= s._id %>">
                     <td><%= empCode %></td>
-                    <td class="<%= empAggregates[s.employee?.empCode]?.total < totalPossibleHours ? 'table-warning' : '' %>">
+                    <td class="resource-name">
     <%= s.employee?.name || 'N/A' %>
 </td>
 
@@ -159,8 +168,6 @@ schedules.forEach(s => {
                         const h = (s.dailyHours && s.dailyHours[date] !== undefined && s.dailyHours[date] != 0) ? Number(s.dailyHours[date]) : 0;
                         totalHours += h;
                         let cellClass = (dow === 0 || dow === 6) ? 'weekend-col ' : '';
-                        // Highlight only if employee's total for the day < 8
-                        if (empDayTotals[s.employee?.empCode || 'N/A'][date] > 0 && empDayTotals[s.employee?.empCode || 'N/A'][date] < 8) cellClass += 'low-hours ';
                         const isWeekend = (dow === 0 || dow === 6);
                     %>
                         <td class="hours-cell <%= cellClass.trim() %>" data-date="<%= date %>">
@@ -253,23 +260,52 @@ schedules.forEach(s => {
         const $input = $(this);
         const rowId = $input.data('rowid');
         const date = $input.data('date');
-        const value = $input.val();
+        const prevValue = $input.data('prev') !== undefined ? $input.data('prev') : $input.prop('defaultValue');
+        const value = Number($input.val()) || 0;
         // Collect all dailyHours for this row
         const dailyHours = {};
         $input.closest('tr').find('.drag-fill-hours').each(function () {
-            dailyHours[$(this).data('date')] = $(this).val();
+            dailyHours[$(this).data('date')] = Number($(this).val()) || 0;
         });
         // Project name (read-only)
         const project = $input.closest('tr').find('.project-cell span').text().trim();
+
+        // --- Validation: Prevent >8 hours per employee per day ---
+        // Find all rows for this employee and sum hours for this date
+        const empCode = $input.closest('tr').find('td').first().text().trim();
+        let totalDayHours = 0;
+        $('#assignedSchedulesTable tbody tr').each(function () {
+            const $row = $(this);
+            const rowEmpCode = $row.find('td').first().text().trim();
+            if (rowEmpCode === empCode) {
+                $row.find('.drag-fill-hours').each(function () {
+                    if ($(this).data('date') === date) {
+                        totalDayHours += Number($(this).val()) || 0;
+                    }
+                });
+            }
+        });
+        if (totalDayHours > 8) {
+            alert('Total hours for this employee on ' + date + ' exceed 8! Please adjust.');
+            $input.val(prevValue);
+            return;
+        }
+
         $.ajax({
             url: '/dashboard/manager/assigned-resources/' + rowId,
             type: 'PUT',
-            data: { project: { projectName: project }, dailyHours },
+            contentType: 'application/json',
+            data: JSON.stringify({ project: { projectName: project }, dailyHours }),
             success: function () {},
             error: function (xhr) {
                 alert(xhr.responseJSON?.error || 'Error saving data');
             }
         });
+    });
+
+    // Track previous value for each input
+    $(document).on('focus', '.drag-fill-hours', function () {
+        $(this).data('prev', $(this).val());
     });
 
     function deleteSchedule(id) {

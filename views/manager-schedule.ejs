@@ -10,6 +10,18 @@
     .form-section {
       margin-bottom: 20px;
     }
+    .conflict-warning {
+      background-color: #fff3cd;
+      border: 1px solid #ffeaa7;
+      border-radius: 0.375rem;
+      padding: 0.75rem;
+      margin: 0.5rem 0;
+      color: #856404;
+    }
+    .allocation-status {
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
   </style>
 </head>
 <body class="bg-light">
@@ -26,16 +38,28 @@
 
     <!-- Employee selection -->
     <div class="form-section">
+      <div class="row align-items-end mb-2">
+        <div class="col-md-12">
+          <div class="d-flex flex-wrap align-items-center gap-4">
+            <div class="flex-grow-1" style="min-width:260px;">
+              <label for="practice-dropdown" class="form-label mb-1"><strong>Select Home Practice:</strong></label>
+              <select id="practice-dropdown" class="form-select" onchange="onPracticeChange()">
+                <option value="all">All Employees</option>
+                <% practices.forEach(practice => { %>
+                  <option value="<%= practice %>"><%= practice %></option>
+                <% }) %>
+              </select>
+            </div>
+            <!-- <div class="flex-grow-1" style="min-width:260px; margin-top: 1.7rem;">
+              <label for="employee-search" class="form-label mb-1"><strong>Search Employees:</strong></label>
+              <input id="employee-search" type="text" class="form-control form-control-sm" style="max-width: 600px;" placeholder="🔍 Search employees..." oninput="onEmployeeSearch()">
+            </div> -->
+          </div>
+        </div>
+      </div>
       <label class="form-label"><strong>Select Employees:</strong></label>
       <div id="employee-checkboxes" class="border rounded p-3 bg-light" style="max-height: 200px; overflow-y: auto;">
-        <% employees.forEach(emp => { %>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" name="emp_ids" value="<%= emp.empCode %>" onchange="onEmployeeSelection()">
-            <label class="form-check-label">
-              <%= emp.empCode %> - <%= emp.name %>
-            </label>
-          </div>
-        <% }) %>
+        <!-- Employee checkboxes will be rendered here by JS -->
       </div>
     </div>
 
@@ -50,6 +74,7 @@
             <th>Division</th>
             <th>Practice</th>
             <th>Practice Head</th>
+            <th>Current Allocations</th>
           </tr>
         </thead>
         <tbody id="employee-table-body"></tbody>
@@ -75,6 +100,9 @@
 
     <!-- Submit button -->
     <div class="text-center mt-4">
+      <button type="button" class="btn btn-outline-info me-2" onclick="checkConflictsManually()">
+        🔍 Check Conflicts
+      </button>
       <button type="submit" class="btn btn-success px-5">
         ✅ Assign Schedule
       </button>
@@ -84,6 +112,58 @@
 
 <!-- ✅ JavaScript -->
 <script>
+  // Employees data for filtering (injected from server)
+  const allEmployees = <%- JSON.stringify(employees) %>;
+
+  // Render employee checkboxes for selected practice
+  function renderEmployeeCheckboxes(practice, searchTerm = '') {
+    const container = document.getElementById('employee-checkboxes');
+    container.innerHTML = '';
+    let filtered = [];
+    if (!practice || practice === 'all') {
+      filtered = allEmployees;
+    } else {
+      filtered = allEmployees.filter(emp => emp.homePractice === practice);
+    }
+    if (searchTerm) {
+      const term = searchTerm.trim().toLowerCase();
+      filtered = filtered.filter(emp =>
+        emp.empCode.toLowerCase().includes(term) ||
+        (emp.name && emp.name.toLowerCase().includes(term))
+      );
+    }
+    if (!filtered.length) {
+      container.innerHTML = '<div class="text-muted">No employees found for this filter.</div>';
+      return;
+    }
+    filtered.forEach(emp => {
+      const div = document.createElement('div');
+      div.className = 'form-check';
+      div.innerHTML = `
+        <input class="form-check-input" type="checkbox" name="emp_ids" value="${emp.empCode}" onchange="onEmployeeSelection()">
+        <label class="form-check-label">${emp.empCode} - ${emp.name}</label>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  // Handle employee search input
+  function onEmployeeSearch() {
+    const practice = document.getElementById('practice-dropdown').value;
+    const searchTerm = document.getElementById('employee-search').value;
+    renderEmployeeCheckboxes(practice, searchTerm);
+  }
+
+  // On practice dropdown change
+  function onPracticeChange() {
+    const practice = document.getElementById('practice-dropdown').value;
+    const searchTerm = document.getElementById('employee-search') ? document.getElementById('employee-search').value : '';
+    renderEmployeeCheckboxes(practice, searchTerm);
+    // Clear employee table and project allocation section
+    fetchEmployeeDetails([]);
+    document.getElementById('project-allocation-section').innerHTML = '';
+  }
+
   // Helper: fetch and show selected employee details
   async function fetchEmployeeDetails(selected) {
     const tbody = document.getElementById('employee-table-body');
@@ -93,11 +173,63 @@
     table.style.display = selected.length ? 'table' : 'none';
     if (!selected.length) return;
     loading.textContent = 'Fetching employee details...';
+    
+    // Get date range for allocation checking
+    const startDate = document.getElementById('start_date').value;
+    const endDate = document.getElementById('end_date').value;
+    let allocationsInfo = {};
+    
+    // Fetch current allocations if dates are set
+    if (startDate && endDate) {
+      try {
+        const allocResponse = await fetch('/api/check-assignments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            empCodes: selected,
+            startDate: startDate,
+            endDate: endDate
+          })
+        });
+        if (allocResponse.ok) {
+          allocationsInfo = await allocResponse.json();
+        }
+      } catch (error) {
+        console.error('Error fetching allocations:', error);
+      }
+    }
+    
     for (const empCode of selected) {
       try {
         const res = await fetch(`/api/employee/${empCode}`);
         if (!res.ok) throw new Error();
         const emp = await res.json();
+        
+        // Calculate allocation summary
+        let allocationSummary = 'Select dates to view';
+        if (allocationsInfo[empCode]) {
+          const totalDays = Object.keys(allocationsInfo[empCode]).length;
+          const allocatedDays = Object.values(allocationsInfo[empCode])
+            .filter(dayInfo => dayInfo.totalHours > 0).length;
+          const maxHours = Math.max(...Object.values(allocationsInfo[empCode])
+            .map(dayInfo => dayInfo.totalHours));
+          
+          if (allocatedDays === 0) {
+            allocationSummary = `<span class="text-success">Available (${totalDays} days)</span>`;
+          } else {
+            const avgHours = Object.values(allocationsInfo[empCode])
+              .reduce((sum, dayInfo) => sum + dayInfo.totalHours, 0) / totalDays;
+            
+            if (maxHours >= 8) {
+              allocationSummary = `<span class="text-danger">⚠️ Fully allocated on some days (max: ${maxHours}h)</span>`;
+            } else if (avgHours >= 6) {
+              allocationSummary = `<span class="text-warning">Mostly allocated (avg: ${avgHours.toFixed(1)}h)</span>`;
+            } else {
+              allocationSummary = `<span class="text-info">Partially allocated (avg: ${avgHours.toFixed(1)}h)</span>`;
+            }
+          }
+        }
+        
         const row = `
           <tr>
             <td>${empCode}</td>
@@ -106,6 +238,7 @@
             <td>${emp.division || ''}</td>
             <td>${emp.practice || ''}</td>
             <td>${emp.practiceHead || ''}</td>
+            <td>${allocationSummary}</td>
           </tr>`;
         tbody.insertAdjacentHTML('beforeend', row);
       } catch {
@@ -222,6 +355,188 @@
     }
     document.querySelector('button[type="submit"]').disabled = !valid;
   }
+
+  // Check for allocation conflicts before form submission
+  async function checkAllocationConflicts() {
+    const selected = Array.from(document.querySelectorAll('input[name="emp_ids"]:checked')).map(cb => cb.value);
+    const startDate = document.getElementById('start_date').value;
+    const endDate = document.getElementById('end_date').value;
+
+    if (!selected.length || !startDate || !endDate) {
+      return { hasConflicts: false, message: '' };
+    }
+
+    // Calculate total hours being allocated per day
+    const projectRows = document.querySelectorAll('#project-rows .row');
+    let totalNewHours = 0;
+    
+    projectRows.forEach(row => {
+      const hoursInput = row.querySelector('input[name="hours_list[]"]');
+      if (hoursInput && hoursInput.value) {
+        totalNewHours += Number(hoursInput.value);
+      }
+    });
+
+    if (totalNewHours === 0) {
+      return { hasConflicts: false, message: '' };
+    }
+
+    try {
+      const response = await fetch('/api/check-assignments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          empCodes: selected,
+          startDate: startDate,
+          endDate: endDate
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to check assignments');
+      }
+
+      const allocations = await response.json();
+      const conflicts = [];
+
+      // Check each employee for conflicts
+      selected.forEach(empCode => {
+        if (allocations[empCode]) {
+          Object.keys(allocations[empCode]).forEach(date => {
+            const existingHours = allocations[empCode][date].totalHours;
+            const newTotal = existingHours + totalNewHours;
+            
+            if (newTotal > 8) {
+              const assignments = allocations[empCode][date].assignments;
+              const projectList = assignments.length > 0 
+                ? assignments.map(a => `${a.projectName} (${a.hours}h)`).join(', ')
+                : 'No projects';
+              
+              conflicts.push({
+                empCode,
+                date,
+                existingHours,
+                newHours: totalNewHours,
+                newTotal,
+                existingAssignments: projectList
+              });
+            }
+          });
+        }
+      });
+
+      if (conflicts.length > 0) {
+        let message = '⚠️ Allocation Conflicts Detected:\n\n';
+        conflicts.forEach(conflict => {
+          message += `• Employee ${conflict.empCode} on ${conflict.date}:\n`;
+          message += `  Current: ${conflict.existingHours}h (${conflict.existingAssignments})\n`;
+          message += `  Adding: ${conflict.newHours}h\n`;
+          message += `  Total: ${conflict.newTotal}h (exceeds 8-hour limit)\n\n`;
+        });
+        message += 'Please adjust the hours or select different dates to avoid conflicts.';
+        
+        return { hasConflicts: true, message };
+      }
+
+      return { hasConflicts: false, message: '' };
+
+    } catch (error) {
+      console.error('Error checking conflicts:', error);
+      return { hasConflicts: false, message: 'Unable to validate conflicts. Please try again.' };
+    }
+  }
+
+  // Manual conflict checking function
+  async function checkConflictsManually() {
+    const loading = document.getElementById('loading-status');
+    const checkBtn = document.querySelector('button[onclick="checkConflictsManually()"]');
+    
+    checkBtn.disabled = true;
+    checkBtn.textContent = 'Checking...';
+    loading.textContent = 'Checking for allocation conflicts...';
+    
+    try {
+      const conflictCheck = await checkAllocationConflicts();
+      
+      if (conflictCheck.hasConflicts) {
+        alert(conflictCheck.message);
+      } else {
+        const selected = Array.from(document.querySelectorAll('input[name="emp_ids"]:checked')).map(cb => cb.value);
+        if (selected.length > 0) {
+          alert('✅ No conflicts found! All selected employees are available for the specified hours and date range.');
+        } else {
+          alert('Please select employees and set dates before checking for conflicts.');
+        }
+      }
+    } catch (error) {
+      console.error('Error checking conflicts:', error);
+      alert('An error occurred while checking conflicts. Please try again.');
+    } finally {
+      loading.textContent = '';
+      checkBtn.disabled = false;
+      checkBtn.textContent = '🔍 Check Conflicts';
+    }
+  }
+
+  // Form submission handler with conflict checking
+  document.addEventListener('DOMContentLoaded', function() {
+    renderEmployeeCheckboxes(''); // Initialize employee list on page load
+    
+    // Add date change handlers to refresh allocation info
+    const startDateInput = document.getElementById('start_date');
+    const endDateInput = document.getElementById('end_date');
+    
+    function onDateChange() {
+      const selected = Array.from(document.querySelectorAll('input[name="emp_ids"]:checked')).map(cb => cb.value);
+      if (selected.length > 0) {
+        fetchEmployeeDetails(selected);
+      }
+    }
+    
+    startDateInput.addEventListener('change', onDateChange);
+    endDateInput.addEventListener('change', onDateChange);
+    
+    // Add form submission handler
+    const form = document.querySelector('form');
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault(); // Prevent default submission
+      
+      const loading = document.getElementById('loading-status');
+      const submitBtn = document.querySelector('button[type="submit"]');
+      
+      // Show loading state
+      loading.textContent = 'Checking for allocation conflicts...';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Checking...';
+      
+      try {
+        const conflictCheck = await checkAllocationConflicts();
+        
+        if (conflictCheck.hasConflicts) {
+          // Show conflicts in alert
+          alert(conflictCheck.message);
+          loading.textContent = '';
+          submitBtn.disabled = false;
+          submitBtn.textContent = '✅ Assign Schedule';
+          return;
+        }
+        
+        // No conflicts, proceed with submission
+        loading.textContent = 'Submitting assignment...';
+        submitBtn.textContent = 'Submitting...';
+        form.submit(); // Submit the form normally
+        
+      } catch (error) {
+        console.error('Error during submission:', error);
+        alert('An error occurred while checking conflicts. Please try again.');
+        loading.textContent = '';
+        submitBtn.disabled = false;
+        submitBtn.textContent = '✅ Assign Schedule';
+      }
+    });
+  });
 </script>
 
 </body>

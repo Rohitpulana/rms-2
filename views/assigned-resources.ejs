@@ -56,7 +56,7 @@ schedules.forEach(s => {
         /* Removed table striping except for weekend columns */
         /* Removed table row hover effect */
         .weekend-col { background: #ececec !important; }
-        .low-hours { background: #fff3cd !important; }
+        .resource-name { background: #fff3cd !important; color:black !important;  padding: 8px !important; }
         .btn-primary, .btn-success, .btn-info { border-radius: 20px; font-weight: 500; }
         .form-label { font-weight: 500; color: #1976d2; }
         .form-select, .form-control { border-radius: 8px; }
@@ -151,10 +151,9 @@ schedules.forEach(s => {
                 %>
                 <tr id="row-<%= s._id %>">
                     <td><%= empCode %></td>
-                    <td class="<%= empAggregates[s.employee?.empCode]?.total < totalPossibleHours ? 'table-warning' : '' %>">
-    <%= s.employee?.name || 'N/A' %>
-</td>
-
+                    <td class="resource-name">
+                        <%= s.employee?.name || 'N/A' %>
+                    </td>
                     <td class="project-cell"><span><%= s.project?.projectName || 'N/A' %></span></td>
                     <% dateRange?.forEach(date => {
                         // Always show all days, but highlight weekends
@@ -166,9 +165,7 @@ schedules.forEach(s => {
                         let dow = d.getDay();
                         const h = (s.dailyHours && s.dailyHours[date] !== undefined && s.dailyHours[date] != 0) ? Number(s.dailyHours[date]) : 0;
                         totalHours += h;
-                        let cellClass = (dow === 0 || dow === 6) ? 'weekend-col ' : '';
-                        // Highlight only if employee's total for the day < 8
-                        if (empDayTotals[s.employee?.empCode || 'N/A'][date] > 0 && empDayTotals[s.employee?.empCode || 'N/A'][date] < 8) cellClass += 'low-hours ';
+                        let cellClass = (dow === 0 || dow === 6) ? 'weekend-col' : '';
                         const isWeekend = (dow === 0 || dow === 6);
                     %>
                         <td class="hours-cell <%= cellClass.trim() %>" data-date="<%= date %>">
@@ -273,7 +270,9 @@ schedules.forEach(s => {
             url: '/assigned-resources/' + rowId,
             type: 'PUT',
             data: { project: { projectName: project }, dailyHours },
-            success: function () {},
+            success: function () {
+                // location.reload();
+            },
             error: function (xhr) {
                 alert(xhr.responseJSON?.error || 'Error saving data');
             }
