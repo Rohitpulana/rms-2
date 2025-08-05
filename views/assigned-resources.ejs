@@ -214,8 +214,14 @@ schedules.forEach(s => {
         clone.querySelector('thead tr').removeChild(clone.querySelector('thead tr').lastElementChild);
         clone.querySelectorAll('tbody tr').forEach(row => row.removeChild(row.lastElementChild));
         clone.querySelectorAll('td, th').forEach(cell => {
-            if (cell.querySelector('span')) cell.innerHTML = cell.querySelector('span').textContent;
-        });
+    // If cell contains an input, use its value
+    const input = cell.querySelector('input');
+    if (input) {
+        cell.innerHTML = input.value;
+    } else if (cell.querySelector('span')) {
+        cell.innerHTML = cell.querySelector('span').textContent;
+    }
+});
 
         const ws = XLSX.utils.table_to_sheet(clone);
         ws['!cols'] = Array.from(clone.querySelectorAll('thead th')).map(th => ({ wch: Math.max(12, th.textContent.length + 2) }));
