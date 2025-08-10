@@ -282,7 +282,9 @@ function onEmployeeSearch() {
         <select name='project_ids[]' class='form-select' required>
           <option value=''>-- Select Project --</option>
           <% projects.forEach(project => { %>
-            <option value='<%= project._id %>'><%= project.projectName %></option>
+            <option value='<%= project._id %>'>
+              <%= project.projectName %> (Manager: <%= project.projectManager %>, CBSL: <%= project.cbslClient %>, DIH: <%= project.dihClient %>)
+            </option>
           <% }) %>
         </select>
       </div>

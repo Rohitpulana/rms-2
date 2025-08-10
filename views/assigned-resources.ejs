@@ -1,10 +1,10 @@
 
 <%
-// Calculate total possible hours in the selected month
+// Calculate total possible hours in the selected month range
 
 let year, month;
-if (typeof monthFilter !== 'undefined' && monthFilter) {
-    const parts = monthFilter.split('-');
+if (typeof fromMonthFilter !== 'undefined' && fromMonthFilter) {
+    const parts = fromMonthFilter.split('-');
     if (parts.length === 2) {
         year = parseInt(parts[0], 10);
         month = parseInt(parts[1], 10);
@@ -14,16 +14,23 @@ if (typeof monthFilter !== 'undefined' && monthFilter) {
     year = today.getFullYear();
     month = today.getMonth() + 1;
 }
-const daysInMonth = new Date(year, month, 0).getDate();
-// Calculate number of weekdays (Mon-Fri) in the month
-let weekdayCount = 0;
-for (let d = 1; d <= daysInMonth; d++) {
-    const dayOfWeek = new Date(year, month - 1, d).getDay();
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) { // 0 = Sunday, 6 = Saturday
-        weekdayCount++;
-    }
+
+// Calculate total possible hours across the date range
+let totalPossibleHours = 0;
+if (dateRange && dateRange.length) {
+    dateRange.forEach(date => {
+        let parts = date.split('-');
+        let day = parseInt(parts[0], 10);
+        let monthShort = parts[1];
+        let yearFromDate = parseInt(parts[2], 10); // Get the actual year from the date
+        let monthNum = new Date(Date.parse(monthShort + " 1, 2020")).getMonth();
+        let d = new Date(yearFromDate, monthNum, day); // Use the correct year
+        let dow = d.getDay();
+        if (dow !== 0 && dow !== 6) { // Skip weekends
+            totalPossibleHours += 8;
+        }
+    });
 }
-let totalPossibleHours = weekdayCount * 8;
 
 // Aggregate total hours per employee across all their schedules
 const empAggregates = {};
@@ -65,14 +72,53 @@ schedules.forEach(s => {
         .table-responsive { border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); background: #fff; }
         #exportExcelBtn { background: linear-gradient(90deg,#1976d2 0,#64b5f6 100%); color: #fff; border: none; }
         #exportExcelBtn:hover { background: linear-gradient(90deg,#1565c0 0,#42a5f5 100%); }
+        .select2-container .select2-selection--single {
+            min-height: 38px;
+            height: 38px;
+            box-sizing: border-box;
+            position: relative;
+            padding-right: 2.2em !important; /* space for clear icon */
+        }
+        .select2-selection__clear {
+            color: #d27219 !important;
+            font-size: 1.2rem !important;
+            opacity: 0.8;
+            position: absolute;
+            right: 0.8em;
+            top: 0%;
+            transform: translateY(-10%);
+            margin: 0 !important;
+            cursor: pointer;
+            transition: color 0.2s;
+            z-index: 2;
+            background: none !important;
+            border: none !important;
+            box-shadow: none !important;
+            pointer-events: auto;
+        }
+        .select2-selection__clear:hover {
+            color: #1565c0 !important;
+            opacity: 1;
+        }
+        @media (max-width: 576px) {
+            .select2-container .select2-selection--single {
+                padding-right: 2rem !important;
+            }
+            .select2-selection__clear {
+                right: 2rem;
+                font-size: 4rem !important;
+            }
+        }
     </style>
 </head>
 <body class="bg-light">
 
 <div class="container mt-5">
     <form class="d-flex mb-3 align-items-center" method="get" action="/assigned-resources">
-        <label for="monthPicker" class="form-label me-2 mb-0">Select Month:</label>
-        <input type="month" id="monthPicker" name="month" class="form-control me-2" style="max-width:180px;" value="<%= monthFilter || '' %>">
+        <label for="fromMonth" class="form-label me-2 mb-0">From Month:</label>
+        <input type="month" id="fromMonth" name="fromMonth" class="form-control me-2" style="max-width:180px;" value="<%= typeof fromMonthFilter !== 'undefined' ? fromMonthFilter : '' %>">
+        <label for="toMonth" class="form-label me-2 mb-0">To Month:</label>
+        <input type="month" id="toMonth" name="toMonth" class="form-control me-2" style="max-width:180px;" value="<%= typeof toMonthFilter !== 'undefined' ? toMonthFilter : '' %>">
         <button type="submit" class="btn btn-primary me-2">Go</button>
         <a href="/schedule" class="btn btn-success ms-auto" style="white-space:nowrap;">Assign Resource</a>
     </form>
@@ -81,6 +127,13 @@ schedules.forEach(s => {
 
     <div class="filter-card mb-4">
         <form class="row g-3" method="get" action="/assigned-resources">
+            <!-- Hidden fields to preserve month filter when using other filters -->
+            <% if (typeof fromMonthFilter !== 'undefined' && fromMonthFilter) { %>
+                <input type="hidden" name="fromMonth" value="<%= fromMonthFilter %>">
+            <% } %>
+            <% if (typeof toMonthFilter !== 'undefined' && toMonthFilter) { %>
+                <input type="hidden" name="toMonth" value="<%= toMonthFilter %>">
+            <% } %>
             <div class="col-md-4">
                 <label for="employeeFilter" class="form-label">Employee</label>
                 <select id="employeeFilter" name="employee" class="form-select">
@@ -133,8 +186,9 @@ schedules.forEach(s => {
                         let parts = date.split('-');
                         let day = parseInt(parts[0], 10);
                         let monthShort = parts[1];
+                        let yearFromDate = parseInt(parts[2], 10); // Get the actual year from the date
                         let monthNum = new Date(Date.parse(monthShort + " 1, 2020")).getMonth();
-                        let d = new Date(year, monthNum, day);
+                        let d = new Date(yearFromDate, monthNum, day); // Use the correct year
                         let dow = d.getDay();
                     %>
                         <th class="<%= (dow === 0 || dow === 6) ? 'weekend-col' : '' %>"><%= date %></th>
@@ -160,8 +214,9 @@ schedules.forEach(s => {
                         let parts = date.split('-');
                         let day = parseInt(parts[0], 10);
                         let monthShort = parts[1];
+                        let yearFromDate = parseInt(parts[2], 10); // Get the actual year from the date
                         let monthNum = new Date(Date.parse(monthShort + " 1, 2020")).getMonth();
-                        let d = new Date(year, monthNum, day);
+                        let d = new Date(yearFromDate, monthNum, day); // Use the correct year
                         let dow = d.getDay();
                         const h = (s.dailyHours && s.dailyHours[date] !== undefined && s.dailyHours[date] != 0) ? Number(s.dailyHours[date]) : 0;
                         totalHours += h;
@@ -196,8 +251,24 @@ schedules.forEach(s => {
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
 
+
+<!-- Select2 for searchable dropdowns -->
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+
 <script>
     $(document).ready(function () {
+         $('#employeeFilter').select2({
+            width: '100%',
+            placeholder: 'Select Employee',
+            allowClear: true
+        });
+        $('#projectFilter').select2({
+            width: '100%',
+            placeholder: 'Select Project',
+            allowClear: true
+        });
         $('#assignedSchedulesTable').DataTable({
             scrollX: false,
             lengthMenu: [[25, 50, 100, -1], [25, 50, 100, 'All']],

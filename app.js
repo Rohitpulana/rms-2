@@ -1,4 +1,3 @@
-
 require('dotenv').config();
 // Manager: Assign Schedule POST
 
@@ -20,6 +19,158 @@ const Employee = require('./models/Employee');
 const ProjectMaster = require('./models/ProjectMaster');
 const PracticeMaster = require('./models/PracticeMaster');
 const AssignedSchedule = require('./models/AssignedSchedule');
+const AuditLog = require('./models/AuditLog');
+
+// Audit logging utility functions
+async function logAuditAction(req, action, assignmentId, before, after, description, changes = {}) {
+  try {
+    console.log('🔍 logAuditAction called:', { action, assignmentId, description });
+    console.log('🔍 Before:', before);
+    console.log('🔍 After:', after);
+    console.log('🔍 Changes:', changes);
+    
+    const manager = req.session.user?.email || 'Unknown';
+    const route = req.route?.path || req.originalUrl;
+    
+    // Get employee and project names for better description
+    let employeeCode = '', employeeName = '', projectName = '';
+    
+    // Handle bulk operations differently
+    if (action === 'bulk_assign' || action === 'bulk_replace') {
+      // For bulk operations, try to get info from changes object
+      if (changes.sourceEmployee) {
+        employeeCode = changes.sourceEmployee;
+        const sourceEmployee = await Employee.findOne({ empCode: changes.sourceEmployee });
+        if (sourceEmployee) {
+          employeeName = sourceEmployee.name;
+        }
+      }
+      
+      // For bulk operations, project name might be in the changes
+      if (changes.sourceProjects && changes.sourceProjects.length > 0) {
+        const firstProject = changes.sourceProjects[0];
+        if (firstProject.projectName) {
+          projectName = firstProject.projectName;
+        } else if (firstProject.projectId) {
+          const projectDoc = await ProjectMaster.findById(firstProject.projectId);
+          if (projectDoc) {
+            projectName = projectDoc.projectName;
+          }
+        }
+      }
+    } else {
+      // Regular operations - use the existing logic
+      if (before?.employee || after?.employee) {
+        const employeeDoc = await Employee.findById(before?.employee || after?.employee);
+        if (employeeDoc) {
+          employeeCode = employeeDoc.empCode;
+          employeeName = employeeDoc.name;
+        }
+      }
+      
+      if (before?.project || after?.project) {
+        const projectDoc = await ProjectMaster.findById(before?.project || after?.project);
+        if (projectDoc) {
+          projectName = projectDoc.projectName;
+        }
+      }
+    }
+
+    // Create detailed description of changes
+    let detailedDescription = description;
+    if (action === 'update' && before && after) {
+      const changeDetails = [];
+      
+      // Check daily hours changes
+      if (before.dailyHours && after.dailyHours) {
+        const beforeHours = before.dailyHours;
+        const afterHours = after.dailyHours;
+        
+        // Find changed dates
+        const allDates = new Set([...Object.keys(beforeHours), ...Object.keys(afterHours)]);
+        
+        for (const date of allDates) {
+          const beforeVal = beforeHours[date] || 0;
+          const afterVal = afterHours[date] || 0;
+          
+          if (beforeVal !== afterVal) {
+            changeDetails.push(`${date}: ${beforeVal}h → ${afterVal}h`);
+          }
+        }
+      }
+      
+      // Check project changes
+      if (before.project?.toString() !== after.project?.toString()) {
+        const beforeProject = await ProjectMaster.findById(before.project);
+        const afterProject = await ProjectMaster.findById(after.project);
+        changeDetails.push(`Project: ${beforeProject?.projectName || 'Unknown'} → ${afterProject?.projectName || 'Unknown'}`);
+      }
+      
+      if (changeDetails.length > 0) {
+        detailedDescription += ` | Changes: ${changeDetails.join(', ')}`;
+      }
+    }
+
+    const auditEntry = await AuditLog.create({
+      manager,
+      managerName: req.session.user?.email?.split('@')[0] || 'Unknown',
+      action,
+      assignmentId,
+      employeeCode,
+      employeeName,
+      projectName,
+      description: detailedDescription,
+      changes,
+      before,
+      after,
+      route,
+      ipAddress: req.ip || req.connection.remoteAddress,
+      userAgent: req.get('User-Agent'),
+      timestamp: new Date()
+    });
+    
+    // console.log('✅ Audit log created successfully:', auditEntry._id);
+    // console.log('✅ Final description:', detailedDescription);
+  } catch (err) {
+    console.error('❌ Audit logging error:', err);
+  }
+}
+
+// Function to revert changes (admin only)
+async function revertAuditLog(auditLogId, adminEmail, reason) {
+  try {
+    const auditLog = await AuditLog.findById(auditLogId);
+    if (!auditLog || auditLog.isReverted) {
+      throw new Error('Audit log not found or already reverted');
+    }
+
+    // Revert the actual assignment change
+    if (auditLog.assignmentId && auditLog.before) {
+      if (auditLog.action === 'delete') {
+        // Recreate the deleted assignment
+        await AssignedSchedule.create(auditLog.before);
+      } else if (auditLog.action === 'create') {
+        // Delete the created assignment
+        await AssignedSchedule.findByIdAndDelete(auditLog.assignmentId);
+      } else if (auditLog.action === 'update') {
+        // Restore previous state
+        await AssignedSchedule.findByIdAndUpdate(auditLog.assignmentId, auditLog.before);
+      }
+    }
+
+    // Mark audit log as reverted
+    auditLog.isReverted = true;
+    auditLog.revertedBy = adminEmail;
+    auditLog.revertedAt = new Date();
+    auditLog.revertReason = reason;
+    await auditLog.save();
+
+    return { success: true, message: 'Changes reverted successfully' };
+  } catch (err) {
+    console.error('Revert error:', err);
+    return { success: false, error: err.message };
+  }
+}
 
 
 // mongoose.connect('mongodb://127.0.0.1:27017/hrms-app', {
@@ -30,10 +181,7 @@ const AssignedSchedule = require('./models/AssignedSchedule');
 
 const mongoURI = process.env.MONGODB_URI;
 
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => {
+mongoose.connect(process.env.MONGODB_URI).then(() => {
   console.log('Connected to MongoDB atlas successfully');
 }).catch(err => {
   console.error('MongoDB connection error:', err);
@@ -54,6 +202,21 @@ const users = [
   {
     email: 'manager.DIH@cbsl.com',
     password: bcrypt.hashSync('123', 10),
+    role: 'manager'
+  },
+  {
+    email: 'manager.ABC@cbsl.com',
+    password: bcrypt.hashSync('abc123', 10),
+    role: 'manager'
+  },
+  {
+    email: 'manager.XYZ@cbsl.com',
+    password: bcrypt.hashSync('xyz123', 10),
+    role: 'manager'
+  },
+  {
+    email: 'manager.PQR@cbsl.com',
+    password: bcrypt.hashSync('pqr123', 10),
     role: 'manager'
   }
 ];
@@ -167,73 +330,91 @@ app.get('/dashboard/manager', isAuth, (req, res) => {
 // Manager Calendar Route
 app.get('/dashboard/manager/calendar-view', (req, res) => {
     // Manager Calendar View: fetch and pass all required data
-    (async () => {
-        try {
-            const monthFilter = req.query.month || '';
+  (async () => {
+    try {
+      // Support month range selection
+      const startMonthParam = req.query.startMonth;
+      const endMonthParam = req.query.endMonth;
 
-            // Get all schedules (optionally, you can filter by manager's employees/projects if needed)
-            const allSchedules = await AssignedSchedule.find()
-                .populate('employee')
-                .populate('project');
+      let startYear, startMonth, endYear, endMonth;
+      if (startMonthParam && endMonthParam) {
+        const startParts = startMonthParam.split('-');
+        const endParts = endMonthParam.split('-');
+        startYear = parseInt(startParts[0], 10);
+        startMonth = parseInt(startParts[1], 10);
+        endYear = parseInt(endParts[0], 10);
+        endMonth = parseInt(endParts[1], 10);
+      } else {
+        const now = new Date();
+        startYear = now.getFullYear();
+        startMonth = now.getMonth() + 1;
+        endYear = now.getFullYear();
+        endMonth = now.getMonth() + 1;
+      }
 
-            // Generate dateRange for the selected month (or current month if not selected), skipping weekends
-            let year, month;
-            if (monthFilter) {
-                const parts = monthFilter.split('-');
-                year = parseInt(parts[0], 10);
-                month = parseInt(parts[1], 10) - 1;
-            } else {
-                const now = new Date();
-                year = now.getFullYear();
-                month = now.getMonth();
-            }
-            const daysInMonth = new Date(year, month + 1, 0).getDate();
-            const dateRange = [];
-            for (let d = 1; d <= daysInMonth; d++) {
-                const dateObj = new Date(year, month, d);
-                const dayOfWeek = dateObj.getDay();
-                if (dayOfWeek === 0 || dayOfWeek === 6) continue; // skip Sunday/Saturday
-                const day = dateObj.getDate();
-                const monthName = dateObj.toLocaleString('default', { month: 'short' });
-                dateRange.push(`${day}-${monthName}`);
-            }
+      // Get all schedules (optionally, you can filter by manager's employees/projects if needed)
+      const allSchedules = await AssignedSchedule.find()
+        .populate('employee')
+        .populate('project');
 
-            // Get all employees
-            const allEmployees = await Employee.find({}, 'empCode name division designation');
-
-            // Build empDayProjects: { empCode: { date: [ { projectName, hours } ] } }
-            const empDayProjects = {};
-            allSchedules.forEach(s => {
-                const empCode = s.employee?.empCode || 'N/A';
-                if (!empDayProjects[empCode]) empDayProjects[empCode] = {};
-                if (s.dailyHours && s.project && s.project.projectName) {
-                    Object.keys(s.dailyHours).forEach(dateKey => {
-                        if (!empDayProjects[empCode][dateKey]) empDayProjects[empCode][dateKey] = [];
-                        empDayProjects[empCode][dateKey].push({
-                            projectName: s.project.projectName,
-                            projectId: s.project._id,
-                            assignmentId: s._id,
-                            hours: Number(s.dailyHours[dateKey]) || 0
-                        });
-                    });
-                }
-            });
-
-            res.render('manager-calendar-view', {
-                year: year,
-                month: month + 1, // for display
-                dateRange,
-                allEmployees,
-                empDayProjects,
-                layout: 'sidebar-layout',
-                title: 'Manager Calendar View',
-                manager: true
-            });
-        } catch (err) {
-            console.error('Error loading manager calendar view:', err);
-            res.status(500).send('Internal Server Error');
+      // Generate dateRange for all working days between start and end month
+      const dateRange = [];
+      let currentYear = startYear;
+      let currentMonth = startMonth;
+      while (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) {
+        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateObj = new Date(currentYear, currentMonth - 1, d);
+          // Include all days (no skipping weekends)
+          const day = dateObj.getDate();
+          const monthName = dateObj.toLocaleString('default', { month: 'short' });
+          dateRange.push(`${day}-${monthName}-${currentYear}`);
         }
-    })();
+        if (currentMonth === 12) {
+          currentMonth = 1;
+          currentYear++;
+        } else {
+          currentMonth++;
+        }
+      }
+
+      // Get all employees
+const allEmployees = await Employee.find({}, 'empCode name division designation homePractice practiceManager');
+      // Build empDayProjects: { empCode: { date: [ { projectName, hours } ] } }
+      const empDayProjects = {};
+      allSchedules.forEach(s => {
+        const empCode = s.employee?.empCode || 'N/A';
+        if (!empDayProjects[empCode]) empDayProjects[empCode] = {};
+        if (s.dailyHours && s.project && s.project.projectName) {
+          Object.keys(s.dailyHours).forEach(dateKey => {
+            if (!empDayProjects[empCode][dateKey]) empDayProjects[empCode][dateKey] = [];
+            empDayProjects[empCode][dateKey].push({
+              projectName: s.project.projectName,
+              projectId: s.project._id,
+              assignmentId: s._id,
+              hours: Number(s.dailyHours[dateKey]) || 0
+            });
+          });
+        }
+      });
+
+      res.render('manager-calendar-view', {
+        startYear,
+        startMonth,
+        endYear,
+        endMonth,
+        dateRange,
+        allEmployees,
+        empDayProjects,
+        layout: 'sidebar-layout',
+        title: 'Manager Calendar View',
+        manager: true
+      });
+    } catch (err) {
+      console.error('Error loading manager calendar view:', err);
+      res.status(500).send('Internal Server Error');
+    }
+  })();
 });
 
 // Manager: Schedule page
@@ -241,7 +422,7 @@ app.get('/dashboard/manager/calendar-view', (req, res) => {
 app.get('/dashboard/manager/schedule', isAuth, async (req, res) => {
   try {
     const employees = await Employee.find();
-    const projects = await ProjectMaster.find();
+    const projects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
     // Get unique home practices from employees
     const practices = [...new Set(employees.map(emp => emp.homePractice).filter(Boolean))];
     res.render('manager-schedule', {
@@ -325,12 +506,28 @@ app.put('/dashboard/manager/assigned-resources/:id', isAuth, async (req, res) =>
       });
       updateFields['dailyHours'] = dailyHoursObj;
     }
+    // Get original schedule for audit logging
+    const originalSchedule = await AssignedSchedule.findById(scheduleId).populate('employee').populate('project');
+    
     const updated = await AssignedSchedule.findByIdAndUpdate(
       scheduleId,
       { $set: updateFields },
       { new: true }
-    );
+    ).populate('employee').populate('project');
+    
     if (updated) {
+      // Audit logging for manager update
+      const changes = {
+        projectName: projectName || 'No change',
+        dailyHours: dailyHoursObj,
+        updatedFields: updateFields
+      };
+      
+      // Create more detailed description
+      let changeDescription = `Manager ${req.session.user?.email} updated assignment for ${originalSchedule?.employee?.empCode || 'Unknown'} on project ${originalSchedule?.project?.projectName || 'Unknown'} via manager-assigned-resources`;
+      
+      await logAuditAction(req, 'update', scheduleId, originalSchedule?.toObject(), updated.toObject(), changeDescription, changes);
+      
       res.json({ success: true, schedule: updated });
     } else {
       res.status(404).json({ success: false, error: 'Schedule not found' });
@@ -345,8 +542,16 @@ app.put('/dashboard/manager/assigned-resources/:id', isAuth, async (req, res) =>
 app.delete('/dashboard/manager/assigned-resources/:id', isAuth, async (req, res) => {
   try {
     const scheduleId = req.params.id;
+    
+    // Get original schedule for audit logging before deletion
+    const originalSchedule = await AssignedSchedule.findById(scheduleId).populate('employee').populate('project');
+    
     const result = await AssignedSchedule.deleteOne({ _id: scheduleId });
     if (result.deletedCount > 0) {
+      // Audit logging for manager delete
+      const description = `Manager ${req.session.user?.email} deleted assignment for ${originalSchedule?.employee?.empCode || 'Unknown'} on project ${originalSchedule?.project?.projectName || 'Unknown'} via manager-assigned-resources`;
+      await logAuditAction(req, 'delete', scheduleId, originalSchedule?.toObject(), null, description);
+      
       res.json({ success: true });
     } else {
       res.status(404).json({ success: false, error: 'Schedule not found' });
@@ -362,7 +567,8 @@ app.get('/dashboard/manager/assigned-resources', isAuth, async (req, res) => {
     // Get filter params
     const employeeFilter = req.query.employee || '';
     const projectFilter = req.query.project || '';
-    const monthFilter = req.query.month || '';
+    const fromMonthFilter = req.query.fromMonth || '';
+    const toMonthFilter = req.query.toMonth || '';
 
     // Fetch schedules with populated employee and project data
     const schedules = await AssignedSchedule.find()
@@ -396,30 +602,53 @@ app.get('/dashboard/manager/assigned-resources', isAuth, async (req, res) => {
     }
     const uniqueSchedules = Object.values(latestSchedules);
 
-    // Generate dateRange for the selected month (or current month if not selected)
-    let year, month;
-    if (monthFilter) {
-      const parts = monthFilter.split('-');
-      year = parseInt(parts[0], 10);
-      month = parseInt(parts[1], 10) - 1;
+    // Generate dateRange for the selected month range (or current month if not selected)
+    let startYear, startMonth, endYear, endMonth;
+    if (fromMonthFilter && toMonthFilter) {
+      // fromMonthFilter and toMonthFilter format: 'YYYY-MM'
+      const fromParts = fromMonthFilter.split('-');
+      const toParts = toMonthFilter.split('-');
+      startYear = parseInt(fromParts[0], 10);
+      startMonth = parseInt(fromParts[1], 10) - 1; // JS months are 0-indexed
+      endYear = parseInt(toParts[0], 10);
+      endMonth = parseInt(toParts[1], 10) - 1;
+    } else if (fromMonthFilter) {
+      const fromParts = fromMonthFilter.split('-');
+      startYear = endYear = parseInt(fromParts[0], 10);
+      startMonth = endMonth = parseInt(fromParts[1], 10) - 1;
+    } else if (toMonthFilter) {
+      const toParts = toMonthFilter.split('-');
+      startYear = endYear = parseInt(toParts[0], 10);
+      startMonth = endMonth = parseInt(toParts[1], 10) - 1;
     } else {
       const now = new Date();
-      year = now.getFullYear();
-      month = now.getMonth();
+      startYear = endYear = now.getFullYear();
+      startMonth = endMonth = now.getMonth();
     }
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    // Generate all dates between start and end month (inclusive)
     const dateRange = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateObj = new Date(year, month, d);
-      const day = dateObj.getDate();
-      const monthName = dateObj.toLocaleString('default', { month: 'short' });
-      dateRange.push(`${day}-${monthName}`);
+    let currentYear = startYear;
+    let currentMonth = startMonth;
+    while (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) {
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateObj = new Date(currentYear, currentMonth, d);
+        const day = dateObj.getDate();
+        const monthName = dateObj.toLocaleString('default', { month: 'short' });
+        const year = dateObj.getFullYear();
+        dateRange.push(`${day}-${monthName}-${year}`);
+      }
+      currentMonth++;
+      if (currentMonth > 11) {
+        currentMonth = 0;
+        currentYear++;
+      }
     }
 
     // Generate all dates for current year (YYYY-MM-DD)
     const allYearDates = [];
-    let minDate = new Date(year + '-01-01');
-    let maxDate = new Date(year + '-12-31');
+    let minDate = new Date(startYear + '-01-01');
+    let maxDate = new Date(endYear + '-12-31');
     for (let d = new Date(minDate); d <= maxDate; d.setDate(d.getDate() + 1)) {
       let dateStr = d.toISOString().slice(0,10);
       allYearDates.push(dateStr);
@@ -430,14 +659,15 @@ app.get('/dashboard/manager/assigned-resources', isAuth, async (req, res) => {
     const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
 
     res.render('manager-assigned-resources', {
-      schedules: schedules,
+      schedules: uniqueSchedules,
       dateRange,
       allYearDates,
       allEmployees,
       allProjects,
       employeeFilter,
       projectFilter,
-      monthFilter,
+      fromMonthFilter,
+      toMonthFilter,
       errorMessage: req.query.error || '',
       layout: 'sidebar-layout',
       title: 'Manager Assigned Resources',
@@ -485,17 +715,87 @@ app.post('/dashboard/manager/schedule', isAuth, async (req, res) => {
         const d = new Date(dateStr);
         const day = d.getDate();
         const monthName = d.toLocaleString('default', { month: 'short' });
-        return `${day}-${monthName}`;
+        const year = d.getFullYear();
+        return `${day}-${monthName}-${year}`;
       }
       return dateStr;
     }
 
-    if (filteredEmpCodes.length === 1 && req.body['project_ids[]']) {
+    const hasMultipleProjects = Array.isArray(req.body['project_ids[]']) && req.body['project_ids[]'].length > 0;
+    const hasMultipleEmployees = filteredEmpCodes.length > 1;
+    if (hasMultipleEmployees && hasMultipleProjects) {
+      // Multiple employees, multiple projects
+      const projectIds = Array.isArray(req.body['project_ids[]']) ? req.body['project_ids[]'] : [req.body['project_ids[]']];
+      const hoursList = Array.isArray(req.body['hours_list[]']) ? req.body['hours_list[]'] : [req.body['hours_list[]']];
+      for (const empCode of filteredEmpCodes) {
+        const employee = await Employee.findOne({ empCode });
+        if (!employee) {
+          console.warn('Employee not found:', empCode);
+          continue;
+        }
+        let overAllocated = false;
+        let overAllocDetails = [];
+        for (const { key: dateKey, dateObj } of dateKeys) {
+          let newTotal = 0;
+          for (let i = 0; i < projectIds.length; i++) {
+            newTotal += Number(hoursList[i]) || 0;
+          }
+          let existingSchedules = await AssignedSchedule.find({ employee: employee._id });
+          let existingTotal = 0;
+          for (const sched of existingSchedules) {
+            let dh = sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)];
+            existingTotal += Number(dh) || 0;
+          }
+          for (let i = 0; i < projectIds.length; i++) {
+            let sched = await AssignedSchedule.findOne({ employee: employee._id, project: projectIds[i] });
+            if (sched && sched.dailyHours && sched.dailyHours[formatDateKey(dateKey)]) {
+              existingTotal -= Number(sched.dailyHours[formatDateKey(dateKey)]) || 0;
+            }
+          }
+          let totalHours = existingTotal + newTotal;
+          if (totalHours > 8) {
+            overAllocated = true;
+            overAllocDetails.push(`${formatDateKey(dateKey)}: ${totalHours} hours`);
+          }
+        }
+        if (overAllocated) {
+          return res.redirect(`/dashboard/manager/assigned-resources?error=${encodeURIComponent('Over allocation: Total hours for ' + empCode + ' exceed 8 on ' + overAllocDetails.join(', '))}`);
+        }
+        for (let i = 0; i < projectIds.length; i++) {
+          const projectId = projectIds[i];
+          const hours = Number(hoursList[i]) || 0;
+          const query = { employee: employee._id, project: projectId };
+          let existingSchedule = await AssignedSchedule.findOne(query);
+          let dailyHoursObj = {};
+          if (existingSchedule && existingSchedule.dailyHours) {
+            dailyHoursObj = { ...existingSchedule.dailyHours };
+          }
+          for (const { key: dateKey, dateObj } of dateKeys) {
+            dailyHoursObj[formatDateKey(dateKey)] = hours;
+          }
+          const previousSchedule = existingSchedule ? existingSchedule.toObject() : null;
+          const updatedSchedule = await AssignedSchedule.findOneAndUpdate(query, {
+            $setOnInsert: { employee: employee._id, project: projectId },
+            $set: { dailyHours: dailyHoursObj, startDate, endDate },
+          }, { upsert: true, new: true });
+          // Audit logging for multiple employees multiple projects
+          const projectDoc = await ProjectMaster.findById(projectId);
+          const description = `Manager ${req.session.user?.email} assigned ${hours} hours to ${empCode} for project ${projectDoc?.projectName || 'Unknown'} from ${startDate.toDateString()} to ${endDate.toDateString()} via manager-schedule`;
+          const changes = {
+            hours: hours,
+            dateRange: `${startDate.toDateString()} to ${endDate.toDateString()}`,
+            dailyHours: dailyHoursObj
+          };
+          await logAuditAction(req, existingSchedule ? 'update' : 'create', updatedSchedule._id, previousSchedule, updatedSchedule.toObject(), description, changes);
+        }
+      }
+    } else if (filteredEmpCodes.length === 1 && req.body['project_ids[]']) {
+      // ...existing code for single employee, multiple projects...
       const empCode = filteredEmpCodes[0];
       const employee = await Employee.findOne({ empCode });
       if (!employee) {
         console.warn('Employee not found:', empCode);
-        return res.redirect('/dashboard/manager/assigned-resources');
+        return res.redirect('/dashboard/manager/calendar-view');
       }
       const projectIds = Array.isArray(req.body['project_ids[]']) ? req.body['project_ids[]'] : [req.body['project_ids[]']];
       const hoursList = Array.isArray(req.body['hours_list[]']) ? req.body['hours_list[]'] : [req.body['hours_list[]']];
@@ -541,12 +841,25 @@ app.post('/dashboard/manager/schedule', isAuth, async (req, res) => {
         for (const { key: dateKey, dateObj } of dateKeys) {
           dailyHoursObj[formatDateKey(dateKey)] = hours;
         }
-        await AssignedSchedule.findOneAndUpdate(query, {
+        
+        const previousSchedule = existingSchedule ? existingSchedule.toObject() : null;
+        const updatedSchedule = await AssignedSchedule.findOneAndUpdate(query, {
           $setOnInsert: { employee: employee._id, project: projectId },
           $set: { dailyHours: dailyHoursObj, startDate, endDate },
         }, { upsert: true, new: true });
+
+        // Audit logging for single employee multiple projects
+        const projectDoc = await ProjectMaster.findById(projectId);
+        const description = `Manager ${req.session.user?.email} assigned ${hours} hours to ${empCode} for project ${projectDoc?.projectName || 'Unknown'} from ${startDate.toDateString()} to ${endDate.toDateString()} via manager-schedule`;
+        const changes = {
+          hours: hours,
+          dateRange: `${startDate.toDateString()} to ${endDate.toDateString()}`,
+          dailyHours: dailyHoursObj
+        };
+        await logAuditAction(req, existingSchedule ? 'update' : 'create', updatedSchedule._id, previousSchedule, updatedSchedule.toObject(), description, changes);
       }
     } else {
+      // ...existing code for multiple employees, single project...
       const projectId = req.body.project_id;
       const hours = Number(req.body.hours) || 0;
       for (const empCode of filteredEmpCodes) {
@@ -586,10 +899,22 @@ app.post('/dashboard/manager/schedule', isAuth, async (req, res) => {
         for (const { key: dateKey, dateObj } of dateKeys) {
           dailyHoursObj[formatDateKey(dateKey)] = hours;
         }
-        await AssignedSchedule.findOneAndUpdate(query, {
+        
+        const previousSchedule = existingSchedule ? existingSchedule.toObject() : null;
+        const updatedSchedule = await AssignedSchedule.findOneAndUpdate(query, {
           $setOnInsert: { employee: employee._id, project: projectId },
           $set: { dailyHours: dailyHoursObj, startDate, endDate },
         }, { upsert: true, new: true });
+
+        // Audit logging for multiple employees single project
+        const projectDoc = await ProjectMaster.findById(projectId);
+        const description = `Manager ${req.session.user?.email} assigned ${hours} hours to ${empCode} for project ${projectDoc?.projectName || 'Unknown'} from ${startDate.toDateString()} to ${endDate.toDateString()} via manager-schedule`;
+        const changes = {
+          hours: hours,
+          dateRange: `${startDate.toDateString()} to ${endDate.toDateString()}`,
+          dailyHours: dailyHoursObj
+        };
+        await logAuditAction(req, existingSchedule ? 'update' : 'create', updatedSchedule._id, previousSchedule, updatedSchedule.toObject(), description, changes);
       }
     }
     res.redirect('/dashboard/manager/assigned-resources');
@@ -961,7 +1286,8 @@ app.get('/assigned-resources', isAuth, isAdmin, async (req, res) => {
     // Get filter params
     const employeeFilter = req.query.employee || '';
     const projectFilter = req.query.project || '';
-    const monthFilter = req.query.month || '';
+    const fromMonthFilter = req.query.fromMonth || '';
+    const toMonthFilter = req.query.toMonth || '';
 
     // Build query for AssignedSchedule
     let scheduleQuery = {};
@@ -992,38 +1318,47 @@ app.get('/assigned-resources', isAuth, isAdmin, async (req, res) => {
     }
     const uniqueSchedules = Object.values(latestSchedules);
 
-    // Debug: Log dailyHours for each schedule
-    //console.log('Assigned Schedules dailyHours:');
-    uniqueSchedules.forEach(s => {
-      //console.log(`Emp: ${s.employee?.empCode}, Project: ${s.project?.projectName}, dailyHours:`, s.dailyHours);
-    });
-
-    // Generate dateRange for the selected month (or current month if not selected)
-    let year, month;
-    if (monthFilter) {
-      // monthFilter format: 'YYYY-MM'
-      const parts = monthFilter.split('-');
-      year = parseInt(parts[0], 10);
-      month = parseInt(parts[1], 10) - 1; // JS months are 0-indexed
+    // Generate dateRange for the selected month range (or current month if not selected)
+    let startYear, startMonth, endYear, endMonth;
+    if (fromMonthFilter && toMonthFilter) {
+      // fromMonthFilter and toMonthFilter format: 'YYYY-MM'
+      const fromParts = fromMonthFilter.split('-');
+      const toParts = toMonthFilter.split('-');
+      startYear = parseInt(fromParts[0], 10);
+      startMonth = parseInt(fromParts[1], 10) - 1; // JS months are 0-indexed
+      endYear = parseInt(toParts[0], 10);
+      endMonth = parseInt(toParts[1], 10) - 1;
     } else {
       const now = new Date();
-      year = now.getFullYear();
-      month = now.getMonth();
+      startYear = now.getFullYear();
+      startMonth = now.getMonth();
+      endYear = startYear;
+      endMonth = startMonth;
     }
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    // Generate all dates between start and end month (inclusive)
     const dateRange = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateObj = new Date(year, month, d);
-      // Format as 'D-MMM' (e.g., '1-May')
-      const day = dateObj.getDate();
-      const monthName = dateObj.toLocaleString('default', { month: 'short' });
-      dateRange.push(`${day}-${monthName}`);
+    let currentYear = startYear;
+    let currentMonth = startMonth;
+    while (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) {
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateObj = new Date(currentYear, currentMonth, d);
+        const day = dateObj.getDate();
+        const monthName = dateObj.toLocaleString('default', { month: 'short' });
+        const year = dateObj.getFullYear();
+        dateRange.push(`${day}-${monthName}-${year}`);
+      }
+      currentMonth++;
+      if (currentMonth > 11) {
+        currentMonth = 0;
+        currentYear++;
+      }
     }
 
     // Generate all dates for current year (YYYY-MM-DD)
     const allYearDates = [];
-    let minDate = new Date(year + '-01-01');
-    let maxDate = new Date(year + '-12-31');
+    let minDate = new Date(startYear + '-01-01');
+    let maxDate = new Date(endYear + '-12-31');
     for (let d = new Date(minDate); d <= maxDate; d.setDate(d.getDate() + 1)) {
       let dateStr = d.toISOString().slice(0,10);
       allYearDates.push(dateStr);
@@ -1031,7 +1366,7 @@ app.get('/assigned-resources', isAuth, isAdmin, async (req, res) => {
 
     // Get all employees and projects for filter dropdowns
     const allEmployees = await Employee.find({}, 'empCode name division designation');
-const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
+    const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
 
     res.render('assigned-resources', {
       schedules: uniqueSchedules,
@@ -1041,7 +1376,8 @@ const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbs
       allProjects,
       employeeFilter,
       projectFilter,
-      monthFilter,
+      fromMonthFilter,
+      toMonthFilter,
       errorMessage: req.query.error || '',
       layout: 'sidebar-layout',
       title: 'Assigned Resources'
@@ -1055,7 +1391,7 @@ const allProjects = await ProjectMaster.find({}, 'projectName projectManager cbs
 // CREATE: Add a new schedule (Admin only)
 app.post('/assigned-resources', isAuth, isAdmin, async (req, res) => {
   try {
-    console.log('POST /assigned-resources', req.body);
+    // console.log('POST /assigned-resources', req.body);
     const { empCode, dailyHours, projectAssigned } = req.body;
     // Find employee and project references
     const employeeDoc = await Employee.findOne({ empCode });
@@ -1077,7 +1413,8 @@ app.post('/assigned-resources', isAuth, isAdmin, async (req, res) => {
         const d = new Date(dateStr);
         const day = d.getDate();
         const monthName = d.toLocaleString('default', { month: 'short' });
-        return `${day}-${monthName}`;
+        const year = d.getFullYear();
+        return `${day}-${monthName}-${year}`;
       }
       return dateStr;
     }
@@ -1110,7 +1447,7 @@ app.post('/assigned-resources', isAuth, isAdmin, async (req, res) => {
 // READ: Get a schedule by ID (for Edit) (Admin only)
 app.get('/assigned-resources/:id', isAuth, async (req, res) => {
   try {
-    console.log('GET /assigned-resources/:id', req.params.id);
+    // console.log('GET /assigned-resources/:id', req.params.id);
     if (!req.params.id.match(/^[0-9a-fA-F]{24}$/)) {
       console.error('Invalid ObjectId format:', req.params.id);
       return res.status(400).json({ success: false, error: 'Invalid schedule ID format' });
@@ -1165,7 +1502,8 @@ app.put('/assigned-resources/:id', isAuth, async (req, res) => {
         const d = new Date(dateStr);
         const day = d.getDate();
         const monthName = d.toLocaleString('default', { month: 'short' });
-        return `${day}-${monthName}`;
+        const year = d.getFullYear();
+        return `${day}-${monthName}-${year}`;
       }
       // If already D-MMM, return as is
       if (/^\d{1,2}-[A-Za-z]{3}$/.test(dateStr)) {
@@ -1176,7 +1514,8 @@ app.put('/assigned-resources/:id', isAuth, async (req, res) => {
       if (!isNaN(d.getTime())) {
         const day = d.getDate();
         const monthName = d.toLocaleString('default', { month: 'short' });
-        return `${day}-${monthName}`;
+        const year = d.getFullYear();
+        return `${day}-${monthName}-${year}`;
       }
       return dateStr;
     }
@@ -1203,6 +1542,7 @@ app.put('/assigned-resources/:id', isAuth, async (req, res) => {
     }
 
     //console.log('Update fields:', updateFields);
+    
     const updated = await AssignedSchedule.findByIdAndUpdate(
       req.params.id,
       { $set: updateFields },
@@ -1214,6 +1554,7 @@ app.put('/assigned-resources/:id', isAuth, async (req, res) => {
         .populate('employee')
         .populate('project')
         .populate('practice');
+      
       //console.log('Update success:', populated);
       res.json({ success: true, schedule: populated });
     } else {
@@ -1230,6 +1571,7 @@ app.put('/assigned-resources/:id', isAuth, async (req, res) => {
 app.delete('/assigned-resources/:id', isAuth, isAdmin, async (req, res) => {
   try {
     //console.log('DELETE /assigned-resources/:id', req.params.id);
+    
     let result = await AssignedSchedule.deleteOne({ _id: req.params.id });
     if (result.deletedCount === 0) {
       result = await AssignedSchedule.deleteOne({ _id: req.params.id.toString() });
@@ -1246,6 +1588,72 @@ app.delete('/assigned-resources/:id', isAuth, isAdmin, async (req, res) => {
 });
 
 
+
+// Admin: View Audit Logs
+app.get('/dashboard/admin/audit-logs', isAuth, isAdmin, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+    
+    // Get filter parameters
+    const managerFilter = req.query.manager || '';
+    const actionFilter = req.query.action || '';
+    const dateFilter = req.query.date || '';
+    
+    // Build query
+    const query = {};
+    if (managerFilter) query.manager = { $regex: managerFilter, $options: 'i' };
+    if (actionFilter) query.action = actionFilter;
+    if (dateFilter) {
+      const startDate = new Date(dateFilter);
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 1);
+      query.timestamp = { $gte: startDate, $lt: endDate };
+    }
+    
+    const auditLogs = await AuditLog.find(query)
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit);
+    
+    const totalLogs = await AuditLog.countDocuments(query);
+    const totalPages = Math.ceil(totalLogs / limit);
+    
+    res.render('audit-logs', {
+      auditLogs,
+      currentPage: page,
+      totalPages,
+      totalLogs,
+      managerFilter,
+      actionFilter,
+      dateFilter,
+      limit,
+      title: 'Manager Audit Logs',
+      layout: 'sidebar-layout'
+    });
+  } catch (err) {
+    console.error('Error loading audit logs:', err);
+    res.status(500).send('Error loading audit logs');
+  }
+});
+
+// Admin: Revert an audit log action
+app.post('/dashboard/admin/audit-logs/:id/revert', isAuth, isAdmin, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const result = await revertAuditLog(req.params.id, req.session.user.email, reason);
+    
+    if (result.success) {
+      res.redirect('/dashboard/admin/audit-logs?message=Changes reverted successfully');
+    } else {
+      res.redirect('/dashboard/admin/audit-logs?error=' + encodeURIComponent(result.error));
+    }
+  } catch (err) {
+    console.error('Error reverting audit log:', err);
+    res.redirect('/dashboard/admin/audit-logs?error=Error reverting changes');
+  }
+});
 
 app.get('/employees/add', isAuth, isAdmin, csrfProtection, async (req, res) => {
   try {
@@ -1401,7 +1809,8 @@ app.post('/employees/:id/dismiss-project', isAuth, isAdmin, csrfProtection, asyn
 app.get('/schedule', isAuth, isAdmin, csrfProtection, async (req, res) => {
   try {
     const employees = await Employee.find();
-    const projects = await ProjectMaster.find();
+    // Fetch projects with manager, CBSL client, and DIH client fields
+    const projects = await ProjectMaster.find({}, 'projectName projectManager cbslClient dihClient');
     // Get unique home practices from employees
     const practices = [...new Set(employees.map(emp => emp.homePractice).filter(Boolean))];
 
@@ -1504,7 +1913,7 @@ app.post('/schedule', async (req, res) => {
       let d = new Date(start);
       while (d <= end) {
         const dayOfWeek = d.getDay(); // 0=Sunday, 6=Saturday
-        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip weekends
           const dateStr = d.toISOString().slice(0,10); // YYYY-MM-DD
           keys.push({ key: dateStr, dateObj: new Date(d) });
         }
@@ -1520,7 +1929,8 @@ app.post('/schedule', async (req, res) => {
         const d = new Date(dateStr);
         const day = d.getDate();
         const monthName = d.toLocaleString('default', { month: 'short' });
-        return `${day}-${monthName}`;
+        const year = d.getFullYear();
+        return `${day}-${monthName}-${year}`;
       }
       return dateStr;
     }
@@ -1632,7 +2042,7 @@ app.post('/schedule', async (req, res) => {
         }, { upsert: true, new: true });
       }
     }
-    res.redirect('/assigned-resources');
+    res.redirect('/calendar-view');
   } catch (error) {
     console.error('Error assigning schedule:', error);
     res.status(500).send('Something went wrong');
@@ -1643,39 +2053,54 @@ app.post('/schedule', async (req, res) => {
 // Calendar View Route
 app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
   try {
-    // Get filter params (optional, can extend for month/year selection)
-    const monthFilter = req.query.month || '';
+    // Get filter params for month range
+    const startMonthParam = req.query.startMonth;
+    const endMonthParam = req.query.endMonth;
+
+    let startYear, startMonth, endYear, endMonth;
+    if (startMonthParam && endMonthParam) {
+      const startParts = startMonthParam.split('-');
+      const endParts = endMonthParam.split('-');
+      startYear = parseInt(startParts[0], 10);
+      startMonth = parseInt(startParts[1], 10);
+      endYear = parseInt(endParts[0], 10);
+      endMonth = parseInt(endParts[1], 10);
+    } else {
+      const now = new Date();
+      startYear = now.getFullYear();
+      startMonth = now.getMonth() + 1;
+      endYear = now.getFullYear();
+      endMonth = now.getMonth() + 1;
+    }
 
     // Build query for AssignedSchedule (all schedules)
     const allSchedules = await AssignedSchedule.find()
       .populate('employee')
       .populate('project');
 
-
-    // Generate dateRange for the selected month (or current month if not selected), skipping weekends
-    let year, month;
-    if (monthFilter) {
-      const parts = monthFilter.split('-');
-      year = parseInt(parts[0], 10);
-      month = parseInt(parts[1], 10) - 1;
-    } else {
-      const now = new Date();
-      year = now.getFullYear();
-      month = now.getMonth();
-    }
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    // Generate dateRange for all working days between start and end month
     const dateRange = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateObj = new Date(year, month, d);
-      const dayOfWeek = dateObj.getDay();
-      if (dayOfWeek === 0 || dayOfWeek === 6) continue; // skip Sunday/Saturday
-      const day = dateObj.getDate();
-      const monthName = dateObj.toLocaleString('default', { month: 'short' });
-      dateRange.push(`${day}-${monthName}`);
+    let currentYear = startYear;
+    let currentMonth = startMonth;
+    while (currentYear < endYear || (currentYear === endYear && currentMonth <= endMonth)) {
+      const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateObj = new Date(currentYear, currentMonth - 1, d);
+        // Include all days (including weekends) in calendar display
+        const day = dateObj.getDate();
+        const monthName = dateObj.toLocaleString('default', { month: 'short' });
+        dateRange.push(`${day}-${monthName}-${currentYear}`);
+      }
+      if (currentMonth === 12) {
+        currentMonth = 1;
+        currentYear++;
+      } else {
+        currentMonth++;
+      }
     }
 
     // Get all employees
-    const allEmployees = await Employee.find({}, 'empCode name division designation');
+    const allEmployees = await Employee.find({}, 'empCode name division designation homePractice practiceManager');
 
 
     // Build empDayProjects: { empCode: { date: [ { projectName, hours, projectId, assignmentId } ] } }
@@ -1697,8 +2122,10 @@ app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
     });
 
     res.render('calendar-view', {
-      year: year,
-      month: month + 1, // for display
+      startYear,
+      startMonth,
+      endYear,
+      endMonth,
       dateRange,
       allEmployees,
       empDayProjects,
@@ -1714,6 +2141,278 @@ app.get('/calendar-view', isAuth, isAdmin, async (req, res) => {
 
 
 // (Place this at the end of the file, after all middleware and routes, but before app.listen)
+
+// === AUDIT LOG ROUTES (Admin Only) ===
+
+// View Manager Audit Logs
+app.get('/audit-logs', isAuth, isAdmin, csrfProtection, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+    
+    // Filters
+    const managerFilter = req.query.manager || '';
+    const actionFilter = req.query.action || '';
+    const dateFrom = req.query.dateFrom || '';
+    const dateTo = req.query.dateTo || '';
+    
+    let query = {};
+    
+    if (managerFilter) {
+      query.manager = { $regex: managerFilter, $options: 'i' };
+    }
+    if (actionFilter) {
+      query.action = actionFilter;
+    }
+    if (dateFrom || dateTo) {
+      query.timestamp = {};
+      if (dateFrom) query.timestamp.$gte = new Date(dateFrom);
+      if (dateTo) query.timestamp.$lte = new Date(dateTo + 'T23:59:59');
+    }
+    
+    const auditLogs = await AuditLog.find(query)
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit);
+    
+    const totalLogs = await AuditLog.countDocuments(query);
+    const totalPages = Math.ceil(totalLogs / limit);
+    
+    res.render('audit-logs', {
+      auditLogs,
+      currentPage: page,
+      totalPages,
+      totalLogs,
+      managerFilter,
+      actionFilter,
+      dateFrom,
+      dateTo,
+      message: req.query.message || '',
+      error: req.query.error || '',
+      csrfToken: req.csrfToken(),
+      title: 'Manager Audit Logs',
+      layout: 'sidebar-layout'
+    });
+  } catch (err) {
+    console.error('Error loading audit logs:', err);
+    res.status(500).send('Error loading audit logs');
+  }
+});
+
+// Revert Manager Action (Admin Only)
+app.post('/audit-logs/:id/revert', isAuth, isAdmin, csrfProtection, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const result = await revertAuditLog(req.params.id, req.session.user.email, reason);
+    
+    if (result.success) {
+      res.redirect('/audit-logs?message=' + encodeURIComponent('Action reverted successfully'));
+    } else {
+      res.redirect('/audit-logs?error=' + encodeURIComponent(result.error));
+    }
+  } catch (err) {
+    console.error('Error reverting action:', err);
+    res.redirect('/audit-logs?error=' + encodeURIComponent('Failed to revert action'));
+  }
+});
+
+// API endpoint for manager calendar view updates (drag-and-drop)
+app.post('/api/manager/update-assignment', isAuth, async (req, res) => {
+  try {
+    // Only allow managers to use this endpoint
+    if (req.session.user?.role !== 'manager') {
+      return res.status(403).json({ success: false, message: 'Access denied. Manager role required.' });
+    }
+
+    const { 
+      assignmentId, 
+      projectId, 
+      oldEmpCode, 
+      oldDate, 
+      newEmpCode, 
+      newDate, 
+      hours, 
+      projectName 
+    } = req.body;
+
+    // Find the source and target employees
+    const oldEmployee = await Employee.findOne({ empCode: oldEmpCode });
+    const newEmployee = await Employee.findOne({ empCode: newEmpCode });
+    
+    if (!oldEmployee) {
+      return res.json({ success: false, message: `Source employee ${oldEmpCode} not found` });
+    }
+    if (!newEmployee) {
+      return res.json({ success: false, message: `Target employee ${newEmpCode} not found` });
+    }
+
+    // Find the assignment schedule for the source employee
+    let sourceSchedule = null;
+    if (assignmentId) {
+      sourceSchedule = await AssignedSchedule.findById(assignmentId).populate('project');
+    }
+    
+    if (!sourceSchedule) {
+      const schedules = await AssignedSchedule.find({ employee: oldEmployee._id }).populate('project');
+      for (let sched of schedules) {
+        if (sched.dailyHours && sched.dailyHours[oldDate] && parseFloat(sched.dailyHours[oldDate]) > 0) {
+          sourceSchedule = sched;
+          break;
+        }
+      }
+    }
+
+    if (!sourceSchedule || !sourceSchedule.dailyHours[oldDate]) {
+      return res.json({ success: false, message: `No assignment found for ${oldEmpCode} on ${oldDate}` });
+    }
+
+    // Store original data for audit
+    const originalSourceData = sourceSchedule.toObject();
+    const originalHours = sourceSchedule.dailyHours[oldDate];
+
+    // Remove hours from source date
+    delete sourceSchedule.dailyHours[oldDate];
+    sourceSchedule.markModified('dailyHours');
+    
+    // Find or create target schedule for the same project
+    let targetSchedule = await AssignedSchedule.findOne({
+      employee: newEmployee._id,
+      project: sourceSchedule.project._id
+    });
+
+    let originalTargetData = null;
+    if (targetSchedule) {
+      originalTargetData = targetSchedule.toObject();
+    }
+
+    if (!targetSchedule) {
+      targetSchedule = new AssignedSchedule({
+        employee: newEmployee._id,
+        project: sourceSchedule.project._id,
+        practice: sourceSchedule.practice,
+        dailyHours: {},
+        role: sourceSchedule.role,
+        startDate: sourceSchedule.startDate,
+        endDate: sourceSchedule.endDate,
+        scheduledBy: req.session.user?.email || 'Manager',
+        scheduledAt: new Date()
+      });
+    }
+
+    // Add hours to target date
+    if (!targetSchedule.dailyHours) {
+      targetSchedule.dailyHours = {};
+    }
+    targetSchedule.dailyHours[newDate] = parseFloat(hours);
+    targetSchedule.markModified('dailyHours');
+
+    // Save both schedules
+    await sourceSchedule.save();
+    await targetSchedule.save();
+
+    // Audit logging for manager calendar view drag-and-drop
+    const description = `Manager ${req.session.user?.email} moved ${originalHours}h assignment from ${oldEmpCode} (${oldDate}) to ${newEmpCode} (${newDate}) for project ${sourceSchedule.project?.projectName || 'Unknown'} via manager-calendar-view drag-and-drop`;
+    const changes = {
+      action: 'calendar-drag-drop',
+      from: { employee: oldEmpCode, date: oldDate, hours: originalHours },
+      to: { employee: newEmpCode, date: newDate, hours: hours },
+      project: sourceSchedule.project?.projectName || 'Unknown'
+    };
+    await logAuditAction(req, 'update', targetSchedule._id, { 
+      sourceScheduleBefore: originalSourceData,
+      targetScheduleBefore: originalTargetData
+    }, { 
+      sourceScheduleAfter: sourceSchedule.toObject(),
+      targetScheduleAfter: targetSchedule.toObject()
+    }, description, changes);
+
+    res.json({ 
+      success: true, 
+      message: `Successfully moved ${hours}h from ${oldEmpCode} to ${newEmpCode}` 
+    });
+
+  } catch (error) {
+    console.error('Error in manager calendar update:', error);
+    res.json({ 
+      success: false, 
+      message: `Internal server error: ${error.message}` 
+    });
+  }
+});
+
+// API endpoint for manager to edit hours directly in calendar view
+app.post('/api/manager/edit-hours', isAuth, async (req, res) => {
+  try {
+    // Only allow managers to use this endpoint
+    if (req.session.user?.role !== 'manager') {
+      return res.status(403).json({ success: false, message: 'Access denied. Manager role required.' });
+    }
+
+    const { empCode, date, projectId, oldHours, newHours } = req.body;
+
+    // Find employee
+    const employee = await Employee.findOne({ empCode });
+    if (!employee) {
+      return res.json({ success: false, message: 'Employee not found' });
+    }
+
+    // Find project
+    const project = await ProjectMaster.findById(projectId);
+    if (!project) {
+      return res.json({ success: false, message: 'Project not found' });
+    }
+
+    // Find the schedule
+    let schedule = await AssignedSchedule.findOne({ 
+      employee: employee._id, 
+      project: projectId 
+    }).populate('project');
+
+    if (!schedule) {
+      return res.json({ success: false, message: 'Schedule not found' });
+    }
+
+    // Store original data for audit
+    const originalSchedule = schedule.toObject();
+
+    // Update hours
+    if (parseFloat(newHours) === 0) {
+      // Remove the date if hours are 0
+      delete schedule.dailyHours[date];
+    } else {
+      // Update hours
+      schedule.dailyHours[date] = parseFloat(newHours);
+    }
+    
+    schedule.markModified('dailyHours');
+    await schedule.save();
+
+    // Audit logging for manager calendar view inline edit
+    const description = `Manager ${req.session.user?.email} changed hours for ${empCode} on ${date} from ${oldHours}h to ${newHours}h for project ${project.projectName} via manager-calendar-view inline edit`;
+    const changes = {
+      action: 'calendar-inline-edit',
+      employee: empCode,
+      date: date,
+      oldHours: oldHours,
+      newHours: newHours,
+      project: project.projectName
+    };
+    await logAuditAction(req, 'update', schedule._id, originalSchedule, schedule.toObject(), description, changes);
+
+    res.json({ 
+      success: true, 
+      message: `Successfully updated hours for ${empCode} on ${date}` 
+    });
+
+  } catch (error) {
+    console.error('Error in manager calendar edit hours:', error);
+    res.json({ 
+      success: false, 
+      message: `Internal server error: ${error.message}` 
+    });
+  }
+});
 
 // API endpoint for updating assignments via drag-and-drop
 app.post('/api/update-assignment', isAuth, isAdmin, async (req, res) => {
@@ -1804,6 +2503,24 @@ app.post('/api/update-assignment', isAuth, isAdmin, async (req, res) => {
     await sourceSchedule.save();
     await targetSchedule.save();
 
+    // Audit logging for drag-and-drop assignment changes (only for managers)
+    if (req.session.user?.role === 'manager') {
+      const description = `Manager ${req.session.user?.email} moved ${originalHours}h assignment from ${oldEmpCode} (${oldDate}) to ${newEmpCode} (${newDate}) for project ${sourceSchedule.project?.projectName || 'Unknown'} via calendar-view drag-and-drop`;
+      const changes = {
+        action: 'drag-and-drop',
+        from: { employee: oldEmpCode, date: oldDate, hours: originalHours },
+        to: { employee: newEmpCode, date: newDate, hours: hours },
+        project: sourceSchedule.project?.projectName || 'Unknown'
+      };
+      await logAuditAction(req, 'update', targetSchedule._id, { 
+        oldAssignment: { employee: oldEmployee._id, date: oldDate, hours: originalHours },
+        sourceSchedule: sourceSchedule.toObject()
+      }, { 
+        newAssignment: { employee: newEmployee._id, date: newDate, hours: hours },
+        targetSchedule: targetSchedule.toObject()
+      }, description, changes);
+    }
+
     //console.log('Assignment updated successfully');
     res.json({ 
       success: true, 
@@ -1891,7 +2608,7 @@ app.post('/api/drag-fill', isAuth, async (req, res) => {
         });
 
         if (!targetSchedule) {
-          // Create new schedule for target employee
+          // Create new schedule
           targetSchedule = new AssignedSchedule({
             employee: targetEmployee._id,
             project: project._id,
@@ -2193,6 +2910,23 @@ app.post('/api/row-drag-fill', isAuth, async (req, res) => {
       }
     }
 
+    // Audit logging for row drag-fill operation
+    const description = `Manager ${req.session.user?.email} performed row drag-fill: copied all projects from ${sourceEmpCode} to ${updatedEmployees} employees via manager-calendar-view`;
+    const changes = {
+      action: 'row-drag-fill',
+      sourceEmployee: sourceEmpCode,
+      targetEmployees: targetEmployees,
+      sourceProjects: rowProjects,
+      successfulEmployees: updatedEmployees,
+      failedEmployees: failedEmployees
+    };
+    await logAuditAction(req, 'bulk_assign', null, null, { 
+      sourceEmpCode,
+      targetEmployees,
+      rowProjects,
+      results: { updatedEmployees, failedEmployees }
+    }, description, changes);
+
     let message = `Successfully copied row data to ${updatedEmployees} employees`;
     if (failedEmployees.length > 0) {
       message += `. Failed: ${failedEmployees.join(', ')}`;
@@ -2322,6 +3056,26 @@ app.post('/api/cell-replace-drag-fill', isAuth, async (req, res) => {
       }
     }
 
+    // Audit logging for cell replace drag-fill operation
+    const description = `Manager ${req.session.user?.email} performed cell replace drag-fill: copied ${sourceProjects.length} projects (${totalSourceHours}h) from ${sourceEmpCode} (${sourceDate}) to ${updatedCells} cells via manager-calendar-view`;
+    const changes = {
+      action: 'cell-replace-drag-fill',
+      sourceEmployee: sourceEmpCode,
+      sourceDate: sourceDate,
+      sourceProjects: sourceProjects,
+      totalSourceHours: totalSourceHours,
+      targetCells: targetCells,
+      successfulCells: updatedCells,
+      failedCells: failedCells
+    };
+    await logAuditAction(req, 'bulk_replace', null, null, {
+      sourceEmpCode,
+      sourceDate,
+      sourceProjects,
+      targetCells,
+      results: { updatedCells, failedCells }
+    }, description, changes);
+
     let message = `Successfully replaced ${updatedCells} cells with source cell content (${sourceProjects.length} projects, ${totalSourceHours}h total)`;
     if (failedCells.length > 0) {
       message += `. Failed: ${failedCells.join(', ')}`;
@@ -2352,6 +3106,17 @@ app.get('/api/projects', isAuth, async (req, res) => {
   } catch (error) {
     console.error('Error fetching projects:', error);
     res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+});
+
+// API endpoint to get all practices for filtering
+app.get('/api/practices', isAuth, async (req, res) => {
+  try {
+    const practices = await PracticeMaster.find({}, 'practiceName practiceManager').sort({ practiceName: 1 });
+    res.json(practices);
+  } catch (error) {
+    console.error('Error fetching practices:', error);
+    res.status(500).json({ error: 'Failed to fetch practices' });
   }
 });
 
@@ -2417,7 +3182,8 @@ app.post('/api/check-assignments', isAuth, async (req, res) => {
       if (dayOfWeek !== 0 && dayOfWeek !== 6) { // Skip weekends
         const day = d.getDate();
         const monthName = d.toLocaleString('default', { month: 'short' });
-        const dateStr = `${day}-${monthName}`;
+        const year = d.getFullYear();
+        const dateStr = `${day}-${monthName}-${year}`;
         dateRange.push(dateStr);
       }
     }
@@ -2532,7 +3298,18 @@ app.post('/api/assignments', isAuth, async (req, res) => {
     }
     
     schedule.markModified('dailyHours');
-    await schedule.save();
+    const savedSchedule = await schedule.save();
+    
+    // Audit logging for manager calendar assignment creation
+    const description = `Manager ${req.session.user?.email} created assignment: ${hours}h of ${project.projectName} to ${employee.name} (${employee.empCode}) on ${date} via manager-calendar-view`;
+    const changes = {
+      action: 'calendar-create',
+      employee: { empCode: employee.empCode, name: employee.name },
+      project: { projectName: project.projectName, projectId: project._id },
+      date: date,
+      hours: parseFloat(hours)
+    };
+    await logAuditAction(req, 'create', savedSchedule._id, null, savedSchedule.toObject(), description, changes);
     
     res.json({ 
       success: true, 
@@ -2563,6 +3340,10 @@ app.put('/api/assignments/:assignmentId', isAuth, async (req, res) => {
       return res.json({ success: false, message: 'Assignment not found' });
     }
     
+    // Store original data for audit logging
+    const originalSchedule = schedule.toObject();
+    const originalHours = schedule.dailyHours && schedule.dailyHours[date] ? schedule.dailyHours[date] : 0;
+    
     if (!schedule.dailyHours) {
       schedule.dailyHours = {};
     }
@@ -2589,7 +3370,18 @@ app.put('/api/assignments/:assignmentId', isAuth, async (req, res) => {
     
     schedule.dailyHours[date] = parseFloat(hours);
     schedule.markModified('dailyHours');
-    await schedule.save();
+    const updatedSchedule = await schedule.save();
+    
+    // Audit logging for manager calendar assignment update
+    const description = `Manager ${req.session.user?.email} updated assignment for ${employee.name} (${employee.empCode}) on ${date}: ${originalHours}h → ${hours}h for project ${schedule.project.projectName} via manager-calendar-view`;
+    const changes = {
+      action: 'calendar-update',
+      employee: { empCode: employee.empCode, name: employee.name },
+      project: { projectName: schedule.project.projectName, projectId: schedule.project._id },
+      date: date,
+      hoursChanged: { from: originalHours, to: parseFloat(hours) }
+    };
+    await logAuditAction(req, 'update', assignmentId, originalSchedule, updatedSchedule.toObject(), description, changes);
     
     res.json({ 
       success: true, 
@@ -2613,25 +3405,48 @@ app.delete('/api/assignments/:assignmentId', isAuth, async (req, res) => {
       return res.json({ success: false, message: 'Assignment not found' });
     }
     
+    // Store original data for audit logging
+    const originalSchedule = schedule.toObject();
+    const deletedHours = schedule.dailyHours && schedule.dailyHours[date] ? schedule.dailyHours[date] : 0;
+    
     // Remove the specific date from dailyHours
     if (schedule.dailyHours && schedule.dailyHours[date]) {
       delete schedule.dailyHours[date];
       schedule.markModified('dailyHours');
       
+      let auditDescription, auditAfter;
+      
       // If no more dates are scheduled, delete the entire schedule
       if (Object.keys(schedule.dailyHours).length === 0) {
         await AssignedSchedule.findByIdAndDelete(assignmentId);
+        auditDescription = `Manager ${req.session.user?.email} deleted assignment and removed entire schedule for ${schedule.employee.name} (${schedule.employee.empCode}) - ${deletedHours}h of ${schedule.project.projectName} on ${date} via manager-calendar-view`;
+        auditAfter = null;
+        
         res.json({ 
           success: true, 
           message: `Successfully deleted assignment and removed empty schedule` 
         });
       } else {
-        await schedule.save();
+        const updatedSchedule = await schedule.save();
+        auditDescription = `Manager ${req.session.user?.email} deleted assignment for ${schedule.employee.name} (${schedule.employee.empCode}) - ${deletedHours}h of ${schedule.project.projectName} on ${date} via manager-calendar-view`;
+        auditAfter = updatedSchedule.toObject();
+        
         res.json({ 
           success: true, 
           message: `Successfully removed assignment for ${date}` 
         });
       }
+      
+      // Audit logging for manager calendar assignment deletion
+      const changes = {
+        action: 'calendar-delete',
+        employee: { empCode: schedule.employee.empCode, name: schedule.employee.name },
+        project: { projectName: schedule.project.projectName, projectId: schedule.project._id },
+        date: date,
+        deletedHours: deletedHours
+      };
+      await logAuditAction(req, 'delete', assignmentId, originalSchedule, auditAfter, auditDescription, changes);
+      
     } else {
       res.json({ success: false, message: 'Assignment for specified date not found' });
     }
