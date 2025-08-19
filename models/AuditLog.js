@@ -2,12 +2,18 @@ const mongoose = require('mongoose');
 
 const AuditLogSchema = new mongoose.Schema({
   manager: {
-    type: String, // manager email or ID
+    type: String, // user email or ID (supports both admin and manager)
     required: true
   },
   managerName: {
-    type: String, // manager name for display
+    type: String, // user name for display
     required: false
+  },
+  userRole: {
+    type: String, // user role: admin or manager
+    required: true,
+    enum: ['admin', 'manager'],
+    default: 'manager'
   },
   action: {
     type: String, // create, update, delete, bulk_assign, bulk_replace

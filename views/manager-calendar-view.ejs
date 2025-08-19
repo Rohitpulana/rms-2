@@ -124,17 +124,17 @@
             <input type="month" id="endMonth" name="endMonth" value="<%= _endYear %>-<%= _endMonth.toString().padStart(2, '0') %>" class="form-control">
           </div>
           <button type="submit" class="btn btn-primary">
-            <i class="fas fa-search"></i> Apply
+            <i class="fas fa-search"></i>
           </button>
         </form>
         
         <div class="filter-actions d-flex align-items-center gap-2">
           <button id="advancedFilterToggle" class="btn btn-outline-secondary">
-            <i class="fas fa-filter"></i> Advanced Filtering & Searching
+            <i class="fas fa-filter"></i>Filtering & Searching
             <i class="fas fa-chevron-down toggle-icon"></i>
           </button>
           <a href="/dashboard/manager/assigned-resources" class="btn btn-secondary">
-            <i class="fas fa-file-excel">  Excel View</i>
+            <i class="fas fa-file-excel">  Table View</i>
           </a>
           <button id="toggleDragFill" class="btn btn-success">
             <i class="fas fa-fill"></i> Enable Drag Fill
@@ -338,43 +338,39 @@
       </div>
     </div>
   </div>
-  <!-- Calendar Container with separate Employee and Calendar sections -->
+  <!-- Calendar Container with Sticky Header and Sticky First Column -->
   <div class="calendar-container board-style-calendar">
-    <!-- Calendar Layout -->
-    <div class="calendar-layout">
-      <!-- Employee Column (Sticky) -->
-      <div class="employee-column">
-        <!-- Employee Header -->
-        <div class="employee-header">
-          <span>Employee</span>
-        </div>
-        <!-- Employee Rows -->
-        <div class="employee-rows">
-          <% allEmployees.forEach(function(emp, empIndex) { %>
-            <div class="employee-row" data-emp-index="<%= empIndex %>">
-              <div class="emp-cell">
-                <div class="emp-name"><%= emp.name %></div>
-                <div class="emp-meta text-muted small"><%= emp.empCode %> | <%= emp.designation %></div>
-              </div>
-            </div>
-          <% }); %>
-        </div>
+    <!-- Calendar Wrapper with proper sticky positioning -->
+    <div class="calendar-wrapper">
+      <!-- Top-left corner cell (sticky in both directions) -->
+      <div class="corner-header">
+        <span>Employee</span>
       </div>
-
-      <!-- Calendar Section (Scrollable) -->
-      <div class="calendar-section">
-        <!-- Dates Header -->
-        <div class="dates-header">
-          <% dateRange.forEach(function(date) { 
-               var d = new Date(date);
-               var isWeekend = (d.getDay() === 0 || d.getDay() === 6); // Sunday=0, Saturday=6
-            %>
-            <div class="date-column<%= isWeekend ? ' weekend' : '' %>"><%= date %></div>
-          <% }); %>
-        </div>
-        
-        <!-- Calendar Grid -->
-        <div class="calendar-grid">
+      
+      <!-- Sticky header row (scrolls horizontally) -->
+      <div class="sticky-header-row">
+        <% dateRange.forEach(function(date) { 
+             var d = new Date(date);
+             var isWeekend = (d.getDay() === 0 || d.getDay() === 6); // Sunday=0, Saturday=6
+          %>
+          <div class="date-column<%= isWeekend ? ' weekend' : '' %>"><%= date %></div>
+        <% }); %>
+      </div>
+      
+      <!-- Sticky first column (scrolls vertically) -->
+      <div class="sticky-first-column">
+        <% allEmployees.forEach(function(emp, empIndex) { %>
+          <div class="employee-row" data-emp-index="<%= empIndex %>">
+            <div class="emp-cell">
+              <div class="emp-name"><%= emp.name %></div>
+              <div class="emp-meta text-muted small"><%= emp.empCode %> | <%= emp.designation %></div>
+            </div>
+          </div>
+        <% }); %>
+      </div>
+      
+      <!-- Scrollable calendar content -->
+      <div class="calendar-content">
         <% function getBlockColor(percent) {
              if (percent >= 100) return '#17befc'; // fully allocated
              if (percent >= 75) return '#fa686d'; // mostly allocated  
@@ -400,7 +396,7 @@
                 data-total-hours="<%= totalHours %>">
               <div class="fixed-block sortable-container">
                 <% if (blocks.length > 0 && totalHours > 0) { %>
-                  <% blocks.forEach(function(block, index) { 
+                <% blocks.filter(function(block) { return block.hours > 0; }).forEach(function(block, index) { 
                     // Calculate proportional height based on hours (out of 8 total, with available space of ~54px)
                     var blockHeightPercent = (block.hours / 8) * 100;
                     var blockHeightPx = Math.max((block.hours / 8) * 54, 12); // Minimum 12px height
@@ -474,7 +470,6 @@
             <% }); %>
           </div>
         <% }); %>
-        </div>
       </div>
     </div>
   </div>
@@ -563,7 +558,7 @@
 .advanced-filters-dropdown {
   max-height: 0;
   overflow: hidden;
-  transition: max-height 0.4s ease, padding 0.4s ease;
+  transition: max-height 0ms ease-in-out, padding 0ms ease-in-out;
   padding: 0 20px;
   margin: 0 -20px;
 }
@@ -741,6 +736,7 @@
 }
 
 /* Buttons */
+/* All buttons use #3498db as background and border */
 .btn {
   border-radius: 8px;
   font-weight: 500;
@@ -748,42 +744,44 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  background: #3498db !important;
+  color: #fff !important;
+  border: 1px solid #3498db !important;
 }
 
-.btn:hover {
+
+.btn:hover, .btn:focus {
+  background: #009ee3 !important;
+  color: #fff !important;
+  border-color: #009ee3 !important;
   transform: translateY(-1px);
 }
 
-.btn-primary {
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-  border: none;
-  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
-}
-
-.btn-primary:hover {
-  box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
-}
-
-.btn-outline-secondary {
-  border-color: #d1d5db;
-  color: #6b7280;
-}
-
-.btn-outline-secondary:hover {
-  background-color: #f3f4f6;
-  border-color: #9ca3af;
-  color: #374151;
-}
-
+.btn-primary,
+.btn-secondary,
+.btn-success,
+.btn-danger,
+.btn-warning,
+.btn-info,
+.btn-outline-secondary,
 .btn-outline-danger {
-  border-color: #f87171;
-  color: #dc2626;
+  background: #3498db !important;
+  color: #fff !important;
+  border: 1px solid #3498db !important;
+  box-shadow: none !important;
 }
 
+.btn-primary:hover,
+.btn-secondary:hover,
+.btn-success:hover,
+.btn-danger:hover,
+.btn-warning:hover,
+.btn-info:hover,
+.btn-outline-secondary:hover,
 .btn-outline-danger:hover {
-  background-color: #dc2626;
-  border-color: #dc2626;
-  color: white;
+  background: #009ee3 !important;
+  color: #fff !important;
+  border-color: #009ee3 !important;
 }
 
 /* Responsive Design */
@@ -1168,72 +1166,127 @@ body {
   pointer-events: none;
 }
 
-/* Calendar Container Layout */
+/* Calendar Container Layout with Sticky Header and Column */
 .calendar-container {
   background: #f8f9fa;
   border-radius: 8px;
   padding: 16px;
   position: relative;
   border: 1px solid #dee2e6;
-}
-
-/* Calendar Layout */
-.calendar-layout {
-  display: flex;
-  background: #f8f9fa;
-  border-radius: 8px;
   overflow: hidden;
 }
 
-/* Employee Column (Sticky) */
-.employee-column {
-  min-width: 200px;
-  max-width: 200px;
-  width: 200px;
-  position: sticky;
-  left: 0;
-  z-index: 11;
-  background: #f8f9fa;
-  border-right: 3px solid #dee2e6;
-  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-  flex-shrink: 0;
+/* Calendar Wrapper - Grid Layout for Sticky Positioning */
+.calendar-wrapper {
+  display: grid;
+  grid-template-areas: 
+    "corner header"
+    "sidebar content";
+  grid-template-columns: 200px 1fr;
+  grid-template-rows: 60px 1fr;
+  height: calc(100vh - 300px); /* Adjust based on your header height */
+  min-height: 600px;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
-.employee-header {
-  height: 60px;
+/* Top-left corner cell (sticky in both directions) */
+.corner-header {
+  grid-area: corner;
+  background: #e9ecef;
+  border-bottom: 2px solid #dee2e6;
+  border-right: 2px solid #dee2e6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 600;
   font-size: 1rem;
   color: #495057;
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+}
+
+/* Sticky header row (scrolls horizontally) */
+.sticky-header-row {
+  grid-area: header;
   display: flex;
-  align-items: center;
-  padding: 12px 16px;
   background: #e9ecef;
   border-bottom: 2px solid #dee2e6;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 }
 
-.employee-rows {
+.sticky-header-row .date-column {
+  min-width: 120px;
+  max-width: 120px;
+  width: 120px;
+  flex-shrink: 0;
+  text-align: center;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #495057;
+  padding: 12px 8px;
+  border-right: 1px solid #dee2e6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+}
+
+.sticky-header-row .date-column:last-child {
+  border-right: none;
+}
+
+/* Sticky first column (scrolls vertically) */
+.sticky-first-column {
+  grid-area: sidebar;
   background: #f8f9fa;
+  border-right: 2px solid #dee2e6;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-shadow: 2px 0 5px rgba(0,0,0,0.1);
 }
 
-.employee-row {
+/* Hide scrollbar for sticky-first-column but keep scroll functionality */
+.sticky-first-column {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+.sticky-first-column::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.sticky-first-column .employee-row {
   height: 80px;
   border-bottom: 1px solid #dee2e6;
   display: flex;
   align-items: center;
-}
-
-.employee-row:last-child {
-  border-bottom: none;
-}
-
-.emp-cell {
-  padding: 12px 16px;
-  width: 100%;
-  text-align: left;
   background: #f1f3f6;
 }
 
-.emp-name {
+.sticky-first-column .employee-row:last-child {
+  border-bottom: none;
+}
+
+.sticky-first-column .emp-cell {
+  padding: 12px 16px;
+  width: 100%;
+  text-align: left;
+}
+
+.sticky-first-column .emp-name {
   font-weight: 600;
   color: #212529;
   font-size: 0.95rem;
@@ -1241,60 +1294,26 @@ body {
   margin-bottom: 4px;
 }
 
-.emp-meta {
+.sticky-first-column .emp-meta {
   font-size: 0.8rem;
   color: #6c757d;
   line-height: 1.1;
 }
 
-/* Calendar Section (Scrollable) */
-.calendar-section {
-  flex: 1;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-
-.dates-header {
-  height: 60px;
-  display: flex;
-  background: #e9ecef;
-  border-bottom: 2px solid #dee2e6;
-  align-items: center;
-  padding: 12px 0;
-}
-
-.date-column {
-  min-width: 120px;
-  max-width: 120px;
-  width: 120px;
-  text-align: center;
-  font-weight: 500;
-  font-size: 0.9rem;
-  color: #495057;
-  padding: 0 8px;
-  border-right: 1px solid #dee2e6;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-}
-
-.date-column:last-child {
-  border-right: none;
-}
-
-/* Calendar Grid */
-.calendar-grid {
+/* Scrollable calendar content */
+.calendar-content {
+  grid-area: content;
+  overflow: auto;
   background: #fff;
 }
 
-.employee-calendar-row {
+.calendar-content .employee-calendar-row {
   display: flex;
   height: 80px;
   border-bottom: 1px solid #dee2e6;
 }
 
-.employee-calendar-row:last-child {
+.calendar-content .employee-calendar-row:last-child {
   border-bottom: none;
 }
 
@@ -1310,6 +1329,7 @@ body {
   transition: box-shadow 0.15s;
   background: #fff;
   position: relative;
+  flex-shrink: 0;
 }
 
 .calendar-cell:last-child {
@@ -1334,6 +1354,98 @@ body {
   flex-direction: column;
   padding: 2px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
+/* Synchronize scrolling between header and content */
+.calendar-wrapper .sticky-header-row::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+
+.calendar-wrapper .calendar-content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.calendar-wrapper .calendar-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.calendar-wrapper .calendar-content::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.calendar-wrapper .calendar-content::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Responsive adjustments for sticky calendar */
+@media (max-width: 768px) {
+  .calendar-wrapper {
+    grid-template-columns: 160px 1fr;
+    height: calc(100vh - 250px);
+  }
+  
+  .sticky-header-row .date-column,
+  .calendar-cell {
+    min-width: 100px !important;
+    max-width: 100px !important;
+    width: 100px !important;
+  }
+  
+  .sticky-header-row .date-column {
+    font-size: 0.8rem;
+    padding: 8px 4px;
+  }
+  
+  .corner-header {
+    font-size: 0.9rem;
+  }
+  
+  .sticky-first-column .emp-name {
+    font-size: 0.85rem;
+  }
+  
+  .sticky-first-column .emp-meta {
+    font-size: 0.7rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .calendar-wrapper {
+    grid-template-columns: 140px 1fr;
+    height: calc(100vh - 200px);
+  }
+  
+  .sticky-header-row .date-column,
+  .calendar-cell {
+    min-width: 80px !important;
+    max-width: 80px !important;
+    width: 80px !important;
+  }
+  
+  .sticky-header-row .date-column {
+    font-size: 0.75rem;
+    padding: 6px 2px;
+  }
+  
+  .corner-header {
+    font-size: 0.8rem;
+    padding: 8px;
+  }
+  
+  .sticky-first-column .emp-name {
+    font-size: 0.8rem;
+  }
+  
+  .sticky-first-column .emp-meta {
+    font-size: 0.65rem !important;
+  }
+  
+  .sticky-first-column .emp-cell {
+    padding: 8px 12px;
+  }
 }
 
 /* Legacy styles for compatibility */
@@ -2144,13 +2256,21 @@ body {
 }
 </style>
 <style>
-.date-column.weekend {
+/* Weekend column and cell highlight */
+.sticky-header-row .date-column.weekend {
   background: #8dbee3 !important;
   color: #090809 !important;
 }
+
 .calendar-cell.weekend {
   background: #adabab !important;
   color: #212529 !important;
+}
+
+/* Additional weekend styling for the sticky layout */
+.date-column.weekend {
+  background: #8dbee3 !important;
+  color: #090809 !important;
 }
 </style>
 
@@ -2190,13 +2310,13 @@ function startWaveProgress() {
   waveAnimationInterval = setInterval(() => {
     // Medium loading progression
     if (waveProgress < 40) {
-      waveProgress += Math.random() * 4 + 2; // Medium initial loading (2-6% per tick)
+      waveProgress += Math.random() * 8 + 6; // Medium initial loading (2-6% per tick)
     } else if (waveProgress < 80) {
-      waveProgress += Math.random() * 3 + 2; // Medium speed (2-5% per tick)
+      waveProgress += Math.random() * 6 + 4; // Medium speed (2-5% per tick)
     } else if (waveProgress < 95) {
-      waveProgress += Math.random() * 2 + 1; // Slower medium speed (1-3% per tick)
+      waveProgress += Math.random() * 4 + 2; // Slower medium speed (1-3% per tick)
     } else {
-      waveProgress += Math.random() * 1 + 0.5; // Gentle final stretch (0.5-1.5% per tick)
+      waveProgress += Math.random() * 2 + 1; // Gentle final stretch (0.5-1.5% per tick)
     }
     
     if (waveProgress >= 100) {
@@ -2211,9 +2331,9 @@ function startWaveProgress() {
     if (waveProgress >= 100) {
       setTimeout(() => {
         hideWaveLoader();
-      }, 500); // Medium delay before hiding
+      }, 200); // Medium delay before hiding
     }
-  }, 100); // Medium update interval
+  }, 25); // Medium update interval
 }
 
 function initializeWave() {
@@ -2275,6 +2395,9 @@ $(document).ready(function() {
   
   // Load available projects
   loadProjects();
+  
+  // Initialize sticky calendar scroll synchronization
+  initializeStickyCalendarScrolling();
   
   // Cell click handler for assignment
   $(document).on('click', '.clickable-cell', function(e) {
@@ -2779,6 +2902,82 @@ $(document).ready(function() {
     }
   });
 });
+
+// Initialize sticky calendar scrolling synchronization
+function initializeStickyCalendarScrolling() {
+  const $headerRow = $('.sticky-header-row');
+  const $calendarContent = $('.calendar-content');
+  const $firstColumn = $('.sticky-first-column');
+  
+  // Synchronize horizontal scrolling between header and content
+  $calendarContent.on('scroll', function() {
+    const scrollLeft = $(this).scrollLeft();
+    const scrollTop = $(this).scrollTop();
+    
+    // Sync horizontal scroll with header
+    $headerRow.scrollLeft(scrollLeft);
+    
+    // Sync vertical scroll with first column
+    $firstColumn.scrollTop(scrollTop);
+  });
+  
+  // Handle header scrolling (when user scrolls header directly)
+  $headerRow.on('scroll', function() {
+    const scrollLeft = $(this).scrollLeft();
+    $calendarContent.scrollLeft(scrollLeft);
+  });
+  
+  // Handle first column scrolling (when user scrolls sidebar directly)
+  $firstColumn.on('scroll', function() {
+    const scrollTop = $(this).scrollTop();
+    $calendarContent.scrollTop(scrollTop);
+  });
+  
+  // Optimize scrolling performance with requestAnimationFrame
+  let ticking = false;
+  
+  function updateScrollPositions() {
+    const scrollLeft = $calendarContent.scrollLeft();
+    const scrollTop = $calendarContent.scrollTop();
+    
+    $headerRow.scrollLeft(scrollLeft);
+    $firstColumn.scrollTop(scrollTop);
+    
+    ticking = false;
+  }
+  
+  $calendarContent.on('scroll', function() {
+    if (!ticking) {
+      requestAnimationFrame(updateScrollPositions);
+      ticking = true;
+    }
+  });
+  
+  // Handle touch scrolling for mobile devices
+  let isTouch = false;
+  
+  $calendarContent.on('touchstart', function() {
+    isTouch = true;
+  });
+  
+  $calendarContent.on('touchend', function() {
+    setTimeout(() => { isTouch = false; }, 300);
+  });
+  
+  // Smooth scrolling behavior for better UX
+  $calendarContent.css({
+    'scroll-behavior': 'smooth',
+    '-webkit-overflow-scrolling': 'touch'
+  });
+  
+  // Ensure proper initial positioning
+  setTimeout(() => {
+    $headerRow.scrollLeft(0);
+    $firstColumn.scrollTop(0);
+    $calendarContent.scrollLeft(0);
+    $calendarContent.scrollTop(0);
+  }, 100);
+}
 
 // Load available projects from server
 function loadProjects() {

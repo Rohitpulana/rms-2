@@ -1,3 +1,7 @@
+.btn.btn-primary[type="submit"] {
+  padding-top: 11px;
+  padding-bottom: 15px;
+}
 /* Premium polished UI for HRMS dashboard */
 
 /* Body & layout */
@@ -64,7 +68,7 @@ a:hover {
 
 /* Form styling */
 form {
-  margin-top: 25px;
+  margin-top: -1px;
 }
 
 label {
@@ -98,10 +102,16 @@ select:focus {
 }
 
 /* Buttons: gradient + neumorphism touch */
+/* Align date pickers with Apply button */
+.date-input-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 button {
   background: linear-gradient(90deg, #3498db, #2980b9);
   color: #fff;
-  padding: 12px 26px;
+    padding: 18px 22px;
   font-size: 16px;
   border: none;
   border-radius: 12px;
@@ -180,6 +190,18 @@ tr:hover {
 }
 
 /* Responsive design */
+/* Uniform header buttons for calendar view */
+.calendar-header-btn {
+  min-width: 170px;
+  height: 48px;
+  padding: 0 24px;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  gap: 8px;
+}
 @media (max-width: 768px) {
   .container {
     padding: 20px;

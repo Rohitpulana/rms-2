@@ -45,30 +45,15 @@
 <body>
 
 <div class="container">
-  <div class="dashboard-header">
-    <div class="dashboard-header-left">
-      <a href="/upload-employees">📤 Upload Employees</a>
-    </div>
-    <h1>📊 Admin Dashboard</h1>
-    <div class="dashboard-header-right">
-      <a href="/employees/add">➕ Add Employee</a>
-    </div>
-  </div>
 
-  <!-- Search + Limit Selector Form -->
+
+  <!-- Search + Upload Employees + Add Employee Button -->
   <form class="search-bar" method="GET" action="/dashboard/admin/view-employees" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
-    <input type="text" id="liveSearchInput" placeholder="🔍Search employees..." />
+    <input type="text" id="liveSearchInput" placeholder="🔍Search employees..." style="width: 220px; min-width: 0;" />
+  <a href="/upload-employees" style="background: #3498db; color: white; padding: 9px 18px; border-radius: 6px; text-decoration: none; font-size: 15px; margin-left: 10px; margin-top: -20px; position: relative; display: inline-block;">📤 Upload Employees</a>
+    <a href="/employees/add" style="background: #3498db; color: white; padding: 9px 18px; border-radius: 6px; text-decoration: none; font-size: 15px; margin-left: 5px; margin-top: -20px; position: relative; display: inline-block;">➕ Add Employee</a>
 
-    <label for="limit">Show:</label>
-    <select name="limit" id="limit" onchange="this.form.submit()">
-      <option value="all" <%= limit === 'all' ? 'selected' : '' %>>All</option>
-      <option value="10" <%= limit == 10 ? 'selected' : '' %>>10</option>
-      <option value="25" <%= limit == 25 ? 'selected' : '' %>>25</option>
-      <option value="50" <%= limit == 50 ? 'selected' : '' %>>50</option>
-      <option value="100" <%= limit == 100 ? 'selected' : '' %>>100</option>
-    </select>
-
-    <button type="submit">🔍 Search</button>
+    <button id="bulkDeleteBtn" style="background: #3498db; color: white; padding: 10px 15px; border: none; border-radius: 8px; cursor: pointer; display: none; margin-left: 10px; margin-top: -20px; position: relative;">🗑 Delete Selected</button>
   </form>
 
   <!-- Table -->
@@ -76,6 +61,7 @@
     <table>
       <thead>
         <tr>
+          <th><input type="checkbox" id="selectAll" style="cursor: pointer;"></th>
           <th>Emp Code</th>
           <th>Name</th>
           <th>Payroll Company</th>
@@ -90,6 +76,7 @@
       <tbody id="employeeTableBody">
         <% employees.forEach(employee => { %>
           <tr>
+            <td><input type="checkbox" class="row-checkbox" value="<%= employee.empCode %>" style="cursor: pointer;"></td>
             <td><%= employee.empCode %></td>
             <td>👤 <%= employee.name %></td>
             <td><%= employee.payrollCompany %></td>
@@ -99,8 +86,10 @@
             <td><%= employee.homePractice %></td>
             <td><%= employee.practiceManager %></td>
             <td class="actions">
-              <a href="/employees/<%= employee.empCode %>/edit">✏ Edit</a> |
-              <a href="#" onclick="deleteEmployee('<%= employee.empCode %>')" style="color: red;">🗑 Delete</a>
+              <form action="/employees/<%= employee.empCode %>/edit" method="get" style="display:inline;">
+                <button type="submit" style="background: #3498db; color: #222; border: none; border-radius: 5px; padding: 5px 12px; cursor: pointer; font-size: 14px;">✏ Edit</button>
+              </form> |
+                <a href="#" onclick="deleteEmployee('<%= employee.empCode %>')" style="color: red; font-size: 22px; vertical-align: middle; text-decoration: none;">🗑️</a>
             </td>
           </tr>
         <% }) %>
@@ -122,13 +111,14 @@
     tableBody.innerHTML = '';
 
     if (!data.employees.length) {
-      tableBody.innerHTML = '<tr><td colspan="9" style="text-align:center;">No employees found.</td></tr>';
+      tableBody.innerHTML = '<tr><td colspan="10" style="text-align:center;">No employees found.</td></tr>';
       return;
     }
 
     data.employees.forEach(emp => {
       tableBody.innerHTML += `
         <tr>
+          <td><input type="checkbox" class="row-checkbox" value="${emp.empCode}" style="cursor: pointer;"></td>
           <td>${emp.empCode}</td>
           <td>👤 ${emp.name}</td>
           <td>${emp.payrollCompany}</td>
@@ -143,6 +133,10 @@
           </td>
         </tr>`;
     });
+    
+    // Re-initialize checkbox handlers after search
+    updateCheckboxHandlers();
+    updateBulkDeleteButton();
   });
 
   function deleteEmployee(empCode) {
@@ -163,6 +157,93 @@
       });
     }
   }
+
+  // Bulk delete functionality
+  function updateCheckboxHandlers() {
+    // Handle "select all" checkbox
+    const selectAll = document.getElementById('selectAll');
+    const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+    
+    selectAll.onchange = function() {
+      rowCheckboxes.forEach(checkbox => {
+        checkbox.checked = this.checked;
+      });
+      updateBulkDeleteButton();
+    };
+    
+    // Handle individual row checkboxes
+    rowCheckboxes.forEach(checkbox => {
+      checkbox.onchange = function() {
+        updateSelectAllState();
+        updateBulkDeleteButton();
+      };
+    });
+  }
+  
+  function updateSelectAllState() {
+    const selectAll = document.getElementById('selectAll');
+    const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+    const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+    
+    if (checkedBoxes.length === 0) {
+      selectAll.indeterminate = false;
+      selectAll.checked = false;
+    } else if (checkedBoxes.length === rowCheckboxes.length) {
+      selectAll.indeterminate = false;
+      selectAll.checked = true;
+    } else {
+      selectAll.indeterminate = true;
+    }
+  }
+  
+  function updateBulkDeleteButton() {
+    const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+    const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+    
+    bulkDeleteBtn.style.display = checkedBoxes.length > 0 ? 'inline-block' : 'none';
+  }
+  
+  function bulkDeleteEmployees() {
+    const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+    const empCodes = Array.from(checkedBoxes).map(cb => cb.value);
+    
+    if (empCodes.length === 0) {
+      alert('Please select employees to delete.');
+      return;
+    }
+    
+    if (confirm(`Are you sure you want to delete ${empCodes.length} selected employee(s)?`)) {
+      fetch('/employees/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'CSRF-Token': csrfToken
+        },
+        body: JSON.stringify({ empCodes: empCodes })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          location.reload();
+        } else {
+          alert('Error deleting employees: ' + data.message);
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Error deleting employees');
+      });
+    }
+  }
+  
+  // Initialize bulk delete functionality
+  document.getElementById('bulkDeleteBtn').onclick = bulkDeleteEmployees;
+  
+  // Initialize checkbox handlers on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    updateCheckboxHandlers();
+    updateBulkDeleteButton();
+  });
 </script>
 
 </body>

@@ -178,9 +178,14 @@ schedules.forEach(s => {
         <table id="assignedSchedulesTable" class="table table-bordered align-middle shadow-sm">
             <thead>
                 <tr>
-                    <th>Emp Code</th>
-                    <th>Resource Name</th>
-                    <th>Project Assigned</th>
+                        <th>Emp Code</th>
+                        <th>Resource Name</th>
+                        <th>Practice</th>
+                        <th>Practice Manager</th>
+                        <th>Project Assigned</th>
+                        <th>CBSL Client</th>
+                        <th>Division</th>
+                        
                     <% if (dateRange && dateRange.length) { dateRange.forEach(function(date) { 
                         // Always show all days, but highlight weekends
                         let parts = date.split('-');
@@ -203,12 +208,17 @@ schedules.forEach(s => {
                     const empCode = s.employee?.empCode || 'N/A';
                     let totalHours = 0;
                 %>
-                <tr id="row-<%= s._id %>">
-                    <td><%= empCode %></td>
-                    <td class="resource-name">
-                        <%= s.employee?.name || 'N/A' %>
-                    </td>
-                    <td class="project-cell"><span><%= s.project?.projectName || 'N/A' %></span></td>
+                    <tr id="row-<%= s._id %>">
+                        <td><%= empCode %></td>
+                        <td class="resource-name">
+                            <%= s.employee?.name || 'N/A' %>
+                        </td>
+                        <td><%= s.employee?.homePractice || 'N/A' %></td>
+                        <td><%= s.employee?.practiceManager || 'N/A' %></td>
+                        <td class="project-cell"><span><%= s.project?.projectName || 'N/A' %></span></td>
+                        <td><%= s.project?.cbslClient || 'N/A' %></td>
+                        <td><%= s.project?.dihClient || 'N/A' %></td>
+                        
                     <% dateRange?.forEach(date => {
                         // Always show all days, but highlight weekends
                         let parts = date.split('-');
