@@ -72,6 +72,97 @@ schedules.forEach(s => {
         .table-responsive { border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); background: #fff; }
         #exportExcelBtn { background: linear-gradient(90deg,#1976d2 0,#64b5f6 100%); color: #fff; border: none; }
         #exportExcelBtn:hover { background: linear-gradient(90deg,#1565c0 0,#42a5f5 100%); }
+
+        .sidebar .dropdown-menu {
+            background: #34495e !important;
+            border: none !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+            border-radius: 0 !important;
+            margin-left: 0 !important;
+            border-left: 2px solid #3498db !important;
+            min-width: auto !important;
+            position: static !important;
+            display: none !important;
+            transform: none !important;
+            padding: 0 !important;
+        }
+
+        .sidebar .dropdown-menu.show {
+            display: block !important;
+        }
+
+        .sidebar .dropdown-item {
+            display: block !important;
+            color: #ecf0f1 !important;
+            padding: 10px 25px !important;
+            text-decoration: none !important;
+            font-size: 15px !important;
+            transition: background 0.3s ease !important;
+            border-left: none !important;
+            background: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            width: 100% !important;
+            text-align: left !important;
+        }
+
+        .sidebar .dropdown-item:hover,
+        .sidebar .dropdown-item:focus {
+            background: #3498db !important;
+            color: white !important;
+        }
+
+        .sidebar .dropdown-item.active {
+            background: #18bc9c !important;
+            color: white !important;
+            font-weight: bold !important;
+        }
+
+        .sidebar .dropdown-toggle {
+            display: block !important;
+            color: white !important;
+            padding: 12px 20px !important;
+            text-decoration: none !important;
+            font-size: 15px !important;
+            transition: background 0.3s ease !important;
+            cursor: pointer !important;
+            position: relative !important;
+            background: transparent !important;
+            border: none !important;
+            width: 100% !important;
+            text-align: left !important;
+        }
+
+        .sidebar .dropdown-toggle:after {
+            content: "";
+            display: inline-block;
+            position: absolute !important;
+            right: 20px !important;
+            top: 50%;
+            width: 0;
+            height: 0;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            border-left: 8px solid #fff;
+            transform: translateY(-50%) rotate(0deg);
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar .dropdown-toggle.active:after {
+            transform: translateY(-50%) rotate(90deg);
+        }
+
+        .sidebar .dropdown-toggle:hover {
+            background: #34495e !important;
+            color: white !important;
+        }
+
+        .sidebar .dropdown-toggle.active {
+            background: #3498db !important;
+            border-left: 4px solid #fff !important;
+            padding-left: 16px !important;
+            color: white !important;
+        }
         .select2-container .select2-selection--single {
             min-height: 38px;
             height: 38px;

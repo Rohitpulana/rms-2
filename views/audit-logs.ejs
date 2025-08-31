@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= title %></title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/jpeg" href="/logo.jpg">
+    <link rel="shortcut icon" type="image/jpeg" href="/logo.jpg">
+    <link rel="apple-touch-icon" href="/logo.jpg">
+    
     <link rel="stylesheet" href="/stylesheets/styles.css">
     <style>
         .audit-table {
@@ -224,6 +230,33 @@
             margin: 0 auto;
             padding: 20px;
         }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .filter-btn, .reset-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        .filter-btn {
+            background-color: #007bff;
+            color: white;
+        }
+        .filter-btn:hover {
+            background-color: #0056b3;
+        }
+        .reset-btn {
+            background-color: #3498db;
+            color: white;
+        }
     </style>
 </head>
 <body>
@@ -274,8 +307,10 @@
                     </div>
                     <div class="filter-group">
                         <label>&nbsp;</label>
-                        <button type="submit">Filter</button>
-                        <a href="/audit-logs">Reset</a>
+                        <div class="button-group">
+                            <button type="submit" class="filter-btn">Filter</button>
+                            <a href="/audit-logs" class="reset-btn">Reset</a>
+                        </div>
                     </div>
                 </div>
             </form>
